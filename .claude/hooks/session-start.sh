@@ -6,9 +6,8 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
-# Tryb asynchroniczny: sesja startuje od razu, hook działa w tle (limit 5 min).
-# Musi to być pierwsza linia na stdout.
-echo '{"async": true, "asyncTimeout": 300000}'
+# Tryb synchroniczny (celowo, bez {"async": true}): wtyczki instalowane w tle
+# nie są ładowane do sesji, która już wystartowała.
 
 cd "${CLAUDE_PROJECT_DIR:-.}"
 
