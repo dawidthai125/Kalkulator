@@ -1,8 +1,7 @@
 # Wtyczki Claude Code
 
-Skopiowane z GitHub (bez hooków):
-- **Superpowers** – https://github.com/obra/superpowers (wszystkie skille)
-- **Everything Claude Code (ECC)** – https://github.com/affaan-m/everything-claude-code (wybrane skille, subagenci i komendy)
+Włączone w `settings.json` (instalują się po zaufaniu folderowi):
+- **superpowers** – https://github.com/obra/superpowers (marketplace `superpowers-marketplace`)
+- **ecc** (Everything Claude Code, pełny zestaw: 71 agentów, 314 skilli, komendy, hooki) – https://github.com/affaan-m/everything-claude-code
 
-Pełny ECC można dodać przez marketplace: `/plugin marketplace add affaan-m/everything-claude-code`.
-Licencje: LICENSE-superpowers, LICENSE-ecc.
+Ręcznie: `/plugin marketplace add obra/superpowers-marketplace` → `/plugin install superpowers@superpowers-marketplace`; `/plugin marketplace add affaan-m/everything-claude-code` → `/plugin install ecc@ecc`.
