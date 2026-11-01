@@ -9,7 +9,7 @@ function fail(r){if(r&&r.error){toast('Błąd: '+r.error.message);return true}re
 async function load(){
   var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*');
   if(fail(a)||fail(b))return;
-  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:+d.rate,entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
+  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:+d.rate,remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
   render();
 }
@@ -46,17 +46,22 @@ function render(){
     return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
-  p.innerHTML=
+  p.innerHTML=dueHtml()+
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label>'+
   '<label>Oprocentowanie roczne (%)<input id="rt" type="number" min="0" step="0.1" inputmode="decimal" value="'+(d.rate||0)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
   '<div class="grid"><div>Kapitał do spłaty<b class="'+(c.cap>0?'neg':'')+'">'+fmt.format(c.cap)+'</b></div><div>Naliczone odsetki<b class="'+(c.int>0?'neg':'')+'">'+fmt.format(c.int)+'</b></div>'+
   '<div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
+  '<div class="card"><h2>Szybkie dopisanie kwoty (dziś)</h2><div class="row"><label>Kwota (zł)<input id="qa" type="text" inputmode="decimal" placeholder="np. 250" autocomplete="off"></label><label>Opis (opcjonalnie)<input id="qn" maxlength="200" autocomplete="off"></label></div>'+
+  '<div class="row" style="margin-top:10px"><button class="btn" id="qLoan" style="background:var(--debt);color:#fff">+ Dług</button><button class="btn" id="qPay" style="background:var(--paid);color:#fff">− Spłata</button></div></div>'+
   '<div class="card"><h2>Dodaj wpis</h2><div class="row"><label>Rodzaj<select id="ty"><option value="loan">Pożyczka</option><option value="pay">Spłata</option></select></label>'+
   '<label>Data (opcjonalnie)<input id="dt" type="date" value="'+today()+'"></label><label>Kwota (zł)<input id="am" type="number" min="0" step="0.01" inputmode="decimal"></label>'+
   '<label class="wide">Opis (opcjonalnie)<input id="nt" maxlength="200" placeholder="np. przelew za październik" autocomplete="off"></label></div>'+
   '<div class="foot"><button class="btn" id="addE">Dodaj wpis</button></div></div>'+
   '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'<p class="msg"></p></div>'+
+  '<div class="card"><h2>Przypomnienie o kwocie</h2><p class="sub">Przy otwarciu aplikacji w dniu terminu (lub później) zobaczysz na górze aktualną kwotę do spłaty.</p>'+
+  '<div class="row"><label>Termin<input id="rd" type="date" value="'+esc(d.remind_at)+'"></label><label>Notatka (opcjonalnie)<input id="rn" maxlength="200" value="'+esc(d.remind_note)+'"></label></div>'+
+  '<div class="row" style="margin-top:10px"><button class="btn" id="rSave">Zapisz przypomnienie</button><button class="btn ghost" id="rIcs" style="color:var(--ink)">Dodaj do Kalendarza iPhone</button><button class="btn ghost" id="rClear">Usuń</button></div></div>'+
   '<div class="card"><h2>Plan rat dla pozostałego kapitału</h2><div class="row"><label>Liczba miesięcy<input id="mo" type="number" min="1" step="1" value="12" inputmode="numeric"></label>'+
   '<label>Rata miesięczna<input id="rata" readonly></label></div></div>'+
   '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota bez znaku to dług (pożyczka). Spłatą jest kwota z minusem oraz linie pod nagłówkiem „Faktury wpłaty:” lub „Przelewy otrzymane” (do pustej linii). Reszta linii po kwocie trafia do opisu. Linie z samymi godzinami (np. „45h wypłata”) liczą się jako godziny × stawka. Sumy i obliczenia (=, +) są pomijane, a ich listę zobaczysz w podglądzie.</p>'+
@@ -71,6 +76,24 @@ function render(){
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
   plan();
+}
+function dueHtml(){
+  var t=today(),a=S.debtors.filter(function(d){return d.remind_at&&d.remind_at<=t});
+  if(!a.length)return '';
+  return a.map(function(d){
+    var c=calc(d),p=d.remind_at.split('-');
+    return '<div class="card remind"><b>🔔 Przypomnienie: '+esc(d.name||'Bez nazwy')+'</b><p class="sub" style="margin:4px 0 8px">Termin '+p[2]+'.'+p[1]+'.'+p[0]+' · '+(c.owed<0?'nadpłata ':'do spłaty ')+'<b class="'+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</b>'+(d.remind_note?'<br>'+esc(d.remind_note):'')+'</p>'+
+      '<div class="row"><button class="btn" data-rgo="'+d.id+'">Otwórz</button><button class="btn ghost" data-rsnooze="'+d.id+'" style="color:var(--ink)">Odłóż o 7 dni</button><button class="btn ghost" data-rdone="'+d.id+'" style="color:var(--ink)">Gotowe</button></div></div>';
+  }).join('');
+}
+function addDays(iso,n){var x=new Date(iso+'T12:00:00');x.setDate(x.getDate()+n);return Loans.localDate(x)}
+function icsFor(d){
+  var c=calc(d),day=d.remind_at.replace(/-/g,''),end=addDays(d.remind_at,1).replace(/-/g,'');
+  var sum='Przypomnienie: '+d.name+' – '+(c.owed<0?'nadpłata ':'do spłaty ')+fmt.format(Math.abs(c.owed));
+  function f(x){return String(x).replace(/\\/g,'\\\\').replace(/[,;]/g,'\\$&').replace(/\r?\n/g,'\\n')}
+  return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Kalkulator//PL','BEGIN:VEVENT','UID:'+d.id+'-'+day+'@kalkulator','DTSTAMP:'+today().replace(/-/g,'')+'T000000Z',
+    'DTSTART;VALUE=DATE:'+day,'DTEND;VALUE=DATE:'+end,'SUMMARY:'+f(sum),'DESCRIPTION:'+f(d.remind_note||''),
+    'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+f(sum),'TRIGGER:PT9H','END:VALARM','END:VEVENT','END:VCALENDAR'].join('\r\n');
 }
 function plan(){
   var d=cur(),m=document.getElementById('mo'),o=document.getElementById('rata'); if(!d||!m)return;
@@ -132,7 +155,7 @@ document.addEventListener('click',async function(e){
   else if(t.dataset.id){S.sel=t.dataset.id;S.editId=null;render()}
   else if(id==='addD'){
     var r=await SB.from('debtors').insert({name:'Dłużnik '+(S.debtors.length+1),rate:0}).select().single();
-    if(fail(r))return; S.debtors.push({id:r.data.id,name:r.data.name,rate:0,entries:[]});S.sel=r.data.id;render();
+    if(fail(r))return; S.debtors.push({id:r.data.id,name:r.data.name,rate:0,remind_at:'',remind_note:'',entries:[]});S.sel=r.data.id;render();
     var n=document.getElementById('nm');if(n){n.focus();n.select()}
   }
   else if(id==='addE'&&d){
@@ -141,6 +164,34 @@ document.addEventListener('click',async function(e){
     var row={debtor_id:d.id,type:document.getElementById('ty').value,date:dt,amount:Math.round(a*100)/100,note:nt||null};
     var r=await SB.from('entries').insert(row).select().single(); if(fail(r))return;
     d.entries.push({id:r.data.id,type:row.type,date:row.date,amount:row.amount,note:nt});render();
+  }
+  else if(id==='qLoan'||id==='qPay'){
+    var qa=parseFloat(document.getElementById('qa').value.replace(/\s/g,'').replace(',','.')),qn=document.getElementById('qn').value.trim();
+    if(!d||!(qa>0)){document.getElementById('qa').focus();toast('Wpisz kwotę większą od zera.');return}
+    var qrow={debtor_id:d.id,type:id==='qLoan'?'loan':'pay',date:today(),amount:Math.round(qa*100)/100,note:qn||null};
+    var qr=await SB.from('entries').insert(qrow).select().single();if(fail(qr))return;
+    d.entries.push({id:qr.data.id,type:qrow.type,date:qrow.date,amount:qrow.amount,note:qn});render();
+    toast('Dodano: '+(qrow.type==='loan'?'dług ':'spłata ')+fmt.format(qrow.amount));
+    var q2=document.getElementById('qa');if(q2)q2.focus();
+  }
+  else if(id==='rSave'||id==='rClear'){
+    var rv=id==='rClear'?'':document.getElementById('rd').value,rnv=id==='rClear'?'':document.getElementById('rn').value.trim();
+    if(id==='rSave'&&!rv){toast('Wybierz termin przypomnienia.');return}
+    var rr=await SB.from('debtors').update({remind_at:rv||null,remind_note:rnv||null}).eq('id',d.id);if(fail(rr))return;
+    d.remind_at=rv;d.remind_note=rnv;render();toast(rv?'Przypomnienie zapisane.':'Przypomnienie usunięte.');
+  }
+  else if(id==='rIcs'){
+    var iv=document.getElementById('rd').value;if(!iv){toast('Najpierw wybierz termin.');return}
+    var tmp={id:d.id,name:d.name,remind_at:iv,remind_note:document.getElementById('rn').value.trim(),entries:d.entries,rate:d.rate};
+    var url=URL.createObjectURL(new Blob([icsFor(tmp)],{type:'text/calendar'})),a=document.createElement('a');
+    a.href=url;a.download='przypomnienie.ics';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},4000);
+  }
+  else if(t.dataset.rgo){S.sel=t.dataset.rgo;S.editId=null;render()}
+  else if(t.dataset.rsnooze||t.dataset.rdone){
+    var rid=t.dataset.rsnooze||t.dataset.rdone,rd=S.debtors.find(function(x){return x.id===rid});if(!rd)return;
+    var nv=t.dataset.rsnooze?addDays(today(),7):'';
+    var r3=await SB.from('debtors').update({remind_at:nv||null,remind_note:nv?(rd.remind_note||null):null}).eq('id',rid);if(fail(r3))return;
+    rd.remind_at=nv;if(!nv)rd.remind_note='';render();
   }
   else if(t.dataset.edit){S.editId=t.dataset.edit;render()}
   else if(t.dataset.cancel){S.editId=null;render()}
