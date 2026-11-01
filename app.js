@@ -59,10 +59,11 @@ function render(){
   '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'<p class="msg"></p></div>'+
   '<div class="card"><h2>Plan rat dla pozostałego kapitału</h2><div class="row"><label>Liczba miesięcy<input id="mo" type="number" min="1" step="1" value="12" inputmode="numeric"></label>'+
   '<label>Rata miesięczna<input id="rata" readonly></label></div></div>'+
-  '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota bez znaku to dług (pożyczka). Spłatą jest kwota z minusem oraz linie pod nagłówkiem „Faktury wpłaty:” lub „Przelewy otrzymane” (do pustej linii). Reszta linii po kwocie trafia do opisu. Sumy, obliczenia (=, +) i godziny są pomijane, a ich listę zobaczysz w podglądzie.</p>'+
+  '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota bez znaku to dług (pożyczka). Spłatą jest kwota z minusem oraz linie pod nagłówkiem „Faktury wpłaty:” lub „Przelewy otrzymane” (do pustej linii). Reszta linii po kwocie trafia do opisu. Linie z samymi godzinami (np. „45h wypłata”) liczą się jako godziny × stawka. Sumy i obliczenia (=, +) są pomijane, a ich listę zobaczysz w podglądzie.</p>'+
   '<textarea id="imptxt" placeholder="Jan Kowalski:&#10;01.10.2026 +500&#10;15.10.2026 -200 zł"></textarea>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px"><input type="checkbox" id="flip" style="width:auto;min-height:0">Odwróć znaki (plus = spłata, minus = pożyczka)</label>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:0 0 10px;font-size:14px"><input type="checkbox" id="hdr" style="width:auto;min-height:0">Linia bez kwoty to nazwa dłużnika (np. „Jan Kowalski:”)</label>'+
+  '<div class="row" style="margin-bottom:10px"><label>Stawka za godzinę (zł), puste = z notatki<input id="hrate" type="number" min="0" step="0.5" inputmode="decimal" placeholder="np. 40"></label></div>'+
   '<button class="btn" id="prev">Podgląd importu</button><div id="impOut" class="imp"></div></div>'+
   '<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
@@ -138,12 +139,13 @@ document.addEventListener('click',async function(e){
   }
   else if(id==='prev'&&d){
     box=document.getElementById('impOut');
-    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked});IMP=pr.rows;
+    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked,hourlyRate:parseFloat(document.getElementById('hrate').value)||0});IMP=pr.rows;
     if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „1500 zł klej” albo „01.10.2026 +500”.</p>'+skipHtml(pr.skip);return}
     var multi=document.getElementById('hdr').checked;
     var nl=IMP.filter(function(x){return x.type==='loan'}),np=IMP.filter(function(x){return x.type==='pay'});
     var sl=sumAmounts(nl),sp=sumAmounts(np);
     box.innerHTML='<div class="grid" style="margin-top:12px"><div>Długi (pożyczki), '+nl.length+' wpisów<b class="neg">'+fmt.format(sl)+'</b></div><div>Spłaty, '+np.length+' wpisów<b class="pos">'+fmt.format(sp)+'</b></div></div>'+
+      (pr.hours&&pr.hours.lines?'<p class="sub" style="margin-top:8px">Godziny przeliczone na kwoty: '+pr.hours.lines+' linii po '+pr.hours.rate+' zł/h.</p>':'')+
       '<p class="sub" style="margin-top:8px">Saldo po imporcie (bez odsetek): <strong class="'+(sl-sp>0?'neg':'pos')+'">'+fmt.format(sl-sp)+'</strong></p>'+
       '<div class="tablewrap"><table><thead><tr>'+(multi?'<th>Dłużnik</th>':'')+'<th>Data</th><th>Rodzaj i opis</th><th class="n">Kwota</th></tr></thead><tbody>'+
       IMP.map(function(x){return '<tr>'+(multi?'<td>'+esc(x.who)+'</td>':'')+'<td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+(x.note?'<span class="note">'+esc(x.note)+'</span>':'')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+

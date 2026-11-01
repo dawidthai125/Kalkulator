@@ -253,3 +253,16 @@ test('parseNotes: format eksportu (data, znak, kwota, opis z cyframi) wraca bez 
   assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.date, x.note]),
     [['loan', 500, '2026-10-15', 'przelew za 3 raty'], ['pay', 200, '2026-10-16', 'zwrot']]);
 });
+
+test('parseNotes: linie z samymi godzinami liczą się jako godziny × stawka z notatki', () => {
+  const r = P('45h wypłata\n45 x 40 = 1800\n27h (sr,czw)\nGodziny przed nowym rokiem 24\nWypłata 24h 960 zł');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount]), [['loan', 1800], ['loan', 1800], ['loan', 1080], ['loan', 960], ['loan', 960]]);
+  assert.equal(r.rows[0].note, '45h wypłata (× 40 zł/h)');
+  assert.deepEqual(r.hours, { rate: 40, lines: 3 });
+});
+
+test('parseNotes: stawka z opcji ma pierwszeństwo, a bez stawki godziny są pomijane', () => {
+  assert.equal(P('45h wypłata\n45 x 40 = 1800', { hourlyRate: 50 }).rows[0].amount, 2250);
+  const r = P('45h wypłata');
+  assert.equal(r.rows.length, 0); assert.equal(r.skip.length, 1);
+});

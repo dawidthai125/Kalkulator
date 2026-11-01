@@ -71,7 +71,7 @@
   var CUR_SRC = '(?:z[łl]|pln)(?![' + LET + '])';
   var NUM_SRC = '\\d{1,3}(?:[ \\u00a0.]\\d{3})+(?:,\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?';
   var AMOUNT_SRC = '(^|[^' + LET + '\\d])([+\\-\\u2212\\u2013])?(' + NUM_SRC + ')(?!\\d)(\\s*' + CUR_SRC + ')?(\\s*h(?![' + LET + ']))?';
-  var SUMMARY_START = new RegExp('^(razem|suma|sumy|całość|calosc|do zapłaty|do zaplaty|zostało|zostalo|było|bylo|jest|poprzednio|godziny)(?![' + LET + '])', 'i');
+  var SUMMARY_START = new RegExp('^(razem|suma|sumy|całość|calosc|do zapłaty|do zaplaty|zostało|zostalo|było|bylo|jest|poprzednio)(?![' + LET + '])', 'i');
   var PAY_HEADER = /(faktur\w*\s+wp[łl]at|wp[łl]at\w*\s+faktur|przelew\w*\s+otrzyman|wp[łl]yw\w*\s+na\s+konto|zwrot\w*)/i;
 
   function toNumber(raw) {
@@ -85,6 +85,15 @@
     if (!validDate(iso)) return null;
     if (iso > asOf) { y -= 1; iso = y + '-' + pad2(+mm) + '-' + pad2(+dd); if (!validDate(iso)) return null; }
     return iso;
+  }
+
+  // Stawka godzinowa z mnożeń typu "45h x 40 = 1800": najczęstszy mnożnik w notatce.
+  function detectRate(txt) {
+    var re = /x\s*(\d{2,3})\s*=/gi, cnt = {}, best = 0, m;
+    txt = txt.replace(/[\u200b-\u200f\u2060\ufeff\ufffc]/g, '');
+    while ((m = re.exec(txt)) !== null) cnt[m[1]] = (cnt[m[1]] || 0) + 1;
+    Object.keys(cnt).forEach(function (k) { if (!best || cnt[k] > cnt[best]) best = k; });
+    return +best || 0;
   }
 
   function cleanNote(txt) {
@@ -102,7 +111,8 @@
   function parseNotes(txt, flip, who, asOf, opts) {
     asOf = asOf || today();
     var headersAsDebtors = !(opts && opts.headersAsDebtors === false);
-    var out = [], skip = [], mode = null, amountRe;
+    var out = [], skip = [], mode = null, amountRe, hoursLines = 0;
+    var rate = opts && +opts.hourlyRate > 0 ? +opts.hourlyRate : detectRate(txt);
     txt.split(/\r?\n/).forEach(function (l) {
       var orig = l.trim();
       var s = l.replace(/[​-‏⁠﻿￼]/g, '').trim();
@@ -142,11 +152,12 @@
           skip.push(orig); return;   // suma lub obliczenie
         }
         amountRe = new RegExp(AMOUNT_SRC, 'gi');
-        var cands = [], m;
+        var cands = [], hrsList = [], m;
         while ((m = amountRe.exec(scan)) !== null) {
           var start = m.index + m[1].length, end = m.index + m[0].length;
           var v = toNumber(m[3]);
-          if (!(v > 0) || m[5] || /^\/\d/.test(scan.slice(end))) continue;   // godziny, ułamki "20/2", zera
+          if (v > 0 && m[5]) { hrsList.push(v); continue; }   // godziny (45h)
+          if (!(v > 0) || /^\/\d/.test(scan.slice(end))) continue;   // ułamki "20/2", zera
           cands.push({ sign: m[2] || '', v: v, cur: !!m[4], start: start, end: end });
         }
         var pick = cands.filter(function (c) { return c.sign; })[0] ||
@@ -156,12 +167,23 @@
           if (cands.length === 1 && bare.length === 1) pick = bare[0];
         }
         var head = s.replace(/[:\-–]+$/, '').trim();
+        var godz = /^godzin/i.test(head), hoursVal = 0;
+        if (!pick && !cands.length && hrsList.length === 1) hoursVal = hrsList[0];
+        else if (godz && pick && !pick.cur && !pick.sign) { hoursVal = pick.v; pick = null; }
+        if (hoursVal) {   // same godziny: kwota = godziny × stawka
+          if (mode === 'skip' || !(rate > 0)) { skip.push(orig); return; }
+          var hneg = mode === 'pay'; if (flip) hneg = !hneg;
+          var hrow = { who: who, date: date, type: hneg ? 'pay' : 'loan', amount: Math.round(hoursVal * rate * 100) / 100 };
+          var hn = cleanNote(s); hrow.note = (hn ? hn + ' ' : '') + '(× ' + rate + ' zł/h)';
+          out.push(hrow); hoursLines++;
+          return;
+        }
 
         if (!pick) {
           if (cands.length || /\d/.test(head)) { skip.push(orig); return; }   // liczba, ale nie wiadomo która
           if (!head) { skip.push(orig); return; }
           // Linia bez cyfr: nagłówek sekcji albo dłużnik
-          if (SUMMARY_START.test(head)) mode = 'skip';
+          if (SUMMARY_START.test(head) || godz) mode = 'skip';
           else if (PAY_HEADER.test(head)) mode = 'pay';
           else { mode = null; if (headersAsDebtors) who = head; }
           return;
@@ -185,7 +207,7 @@
       if (note) r2.note = note;
       out.push(r2);
     });
-    return { rows: out, skip: skip };
+    return { rows: out, skip: skip, hours: { rate: rate, lines: hoursLines } };
   }
 
   return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes };
