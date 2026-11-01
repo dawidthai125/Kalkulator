@@ -90,8 +90,8 @@ function render(){
   var t=document.getElementById('tabs'),p=document.getElementById('panel'),bar=document.getElementById('bar');
   if(!S.user){
     bar.innerHTML='';t.innerHTML='';
-    p.innerHTML='<div class="card"><h2>Zaloguj się, aby zobaczyć swoje dane</h2><div class="row"><label>E-mail<input id="em" type="email" autocomplete="email"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
-    '<div class="row" style="margin-top:12px"><button class="btn" id="login">Zaloguj</button><button class="btn ghost" id="signup" style="color:var(--acc)">Załóż konto</button></div><p class="msg" id="msg"></p></div>';
+    p.innerHTML='<div class="card"><h2>Zaloguj się</h2><div class="row"><label>E-mail<input id="em" type="email" autocomplete="email"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
+    '<div class="row" style="margin-top:12px"><button class="btn" id="login">Zaloguj</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
   if(S.user.user_metadata&&S.user.user_metadata.must_change_password){
@@ -159,12 +159,11 @@ function exportText(all){
 
 document.addEventListener('click',async function(e){
   var t=e.target,id=t.id,d=cur(),box;
-  if(id==='login'||id==='signup'){
+  if(id==='login'){
     var em=document.getElementById('em').value.trim(),pw=document.getElementById('pw').value;
     if(!em||pw.length<6){toast('Podaj e-mail i hasło (min. 6 znaków).');return}
-    var r=id==='login'?await SB.auth.signInWithPassword({email:em,password:pw}):await SB.auth.signUp({email:em,password:pw});
+    var r=await SB.auth.signInWithPassword({email:em,password:pw});
     if(fail(r))return;
-    if(id==='signup'&&!r.data.session)toast('Konto utworzone. Potwierdź adres e-mail w wiadomości i zaloguj się.');
   }
   else if(id==='logout'){await SB.auth.signOut()}
   else if(id==='setpw'){
