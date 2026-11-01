@@ -5,3 +5,5 @@ Prosty kalkulator pożyczek dla każdego dłużnika osobno. Dane w Supabase (RLS
 Statyczna aplikacja: `index.html`. Klucz publishable Supabase w pliku jest publiczny z założenia; dane chroni Row Level Security.
 
 Logika liczenia (odsetki, rata, import z Notatek) jest w `loans.js` i ma testy jednostkowe. Uruchomienie: `node --test` (Node 22+, bez zależności).
+
+Struktura: `index.html` (widok), `app.js` (obsługa strony i Supabase), `loans.js` (liczenie), `vendor/supabase.js` (biblioteka wgrana do repo, patrz `vendor/README.md`), `vercel.json` (nagłówki bezpieczeństwa, w tym CSP bez skryptów inline).
