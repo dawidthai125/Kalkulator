@@ -6,6 +6,10 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# Tryb asynchroniczny: sesja startuje od razu, hook działa w tle (limit 5 min).
+# Musi to być pierwsza linia na stdout.
+echo '{"async": true, "asyncTimeout": 300000}'
+
 cd "${CLAUDE_PROJECT_DIR:-.}"
 
 # Opcje wtyczki ecc@ecc (userConfig). Claude Code czyta pluginConfigs tylko
