@@ -60,6 +60,7 @@ function render(){
   '<div class="card"><h2>Plan rat dla pozostałego kapitału</h2><div class="row"><label>Liczba miesięcy<input id="mo" type="number" min="1" step="1" value="12" inputmode="numeric"></label>'+
   '<label>Rata miesięczna<input id="rata" readonly></label></div></div>'+
   '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota bez znaku to dług (pożyczka). Spłatą jest kwota z minusem oraz linie pod nagłówkiem „Faktury wpłaty:” lub „Przelewy otrzymane” (do pustej linii). Reszta linii po kwocie trafia do opisu. Linie z samymi godzinami (np. „45h wypłata”) liczą się jako godziny × stawka. Sumy i obliczenia (=, +) są pomijane, a ich listę zobaczysz w podglądzie.</p>'+
+  '<label class="filepick">Wczytaj z pliku (Pliki, iCloud Drive: .txt, .md, .csv)<input id="impfile" type="file" accept=".txt,.text,.md,.csv,text/plain,text/markdown,text/csv"></label>'+
   '<textarea id="imptxt" placeholder="Jan Kowalski:&#10;01.10.2026 +500&#10;15.10.2026 -200 zł"></textarea>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px"><input type="checkbox" id="flip" style="width:auto;min-height:0">Odwróć znaki (plus = spłata, minus = pożyczka)</label>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:0 0 10px;font-size:14px"><input type="checkbox" id="hdr" style="width:auto;min-height:0">Linia bez kwoty to nazwa dłużnika (np. „Jan Kowalski:”)</label>'+
@@ -200,6 +201,20 @@ document.addEventListener('change',async function(e){
   var d=cur(); if(!d)return;
   if(e.target.id==='nm'){var v=e.target.value.trim();if(!v)return;var r=await SB.from('debtors').update({name:v}).eq('id',d.id);if(fail(r))return;d.name=v;render()}
   else if(e.target.id==='rt'){var v2=Math.max(0,parseFloat(e.target.value)||0);var r=await SB.from('debtors').update({rate:v2}).eq('id',d.id);if(fail(r))return;d.rate=v2;render()}
+});
+document.addEventListener('change',function(e){
+  if(!e.target||e.target.id!=='impfile')return;
+  var f=e.target.files&&e.target.files[0];if(!f)return;
+  if(f.size>2000000){toast('Plik jest za duży (max 2 MB).');e.target.value='';return}
+  var r=new FileReader();
+  r.onload=function(){
+    var t=String(r.result||'').replace(/^\uFEFF/,'');
+    if(/^%PDF|^\{\\rtf/.test(t)){toast('Ten format nie jest obsługiwany. Zapisz notatkę jako zwykły tekst (.txt).');return}
+    var ta=document.getElementById('imptxt');if(ta)ta.value=t;
+    toast('Wczytano: '+f.name+'. Kliknij Podgląd.');
+  };
+  r.onerror=function(){toast('Nie udało się odczytać pliku.')};
+  r.readAsText(f);e.target.value='';
 });
 document.addEventListener('input',function(e){if(e.target.id==='mo')plan();else if(e.target.classList&&e.target.classList.contains('sk-am'))refreshImpBtn()});
 SB.auth.onAuthStateChange(function(ev,session){
