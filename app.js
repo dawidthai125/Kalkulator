@@ -63,7 +63,8 @@ function render(){
   '<textarea id="imptxt" placeholder="Jan Kowalski:&#10;01.10.2026 +500&#10;15.10.2026 -200 zł"></textarea>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px"><input type="checkbox" id="flip" style="width:auto;min-height:0">Odwróć znaki (plus = spłata, minus = pożyczka)</label>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:0 0 10px;font-size:14px"><input type="checkbox" id="hdr" style="width:auto;min-height:0">Linia bez kwoty to nazwa dłużnika (np. „Jan Kowalski:”)</label>'+
-  '<div class="row" style="margin-bottom:10px"><label>Stawka za godzinę (zł), puste = z notatki<input id="hrate" type="number" min="0" step="0.5" inputmode="decimal" placeholder="np. 40"></label></div>'+
+  '<div class="row" style="margin-bottom:10px"><label>Stawka za godzinę (zł), puste = z notatki<input id="hrate" type="number" min="0" step="0.5" inputmode="decimal" placeholder="np. 40"></label>'+
+  '<label>Data dla wpisów bez daty (puste = dziś)<input id="idate" type="date"></label></div>'+
   '<button class="btn" id="prev">Podgląd importu</button><div id="impOut" class="imp"></div></div>'+
   '<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
@@ -79,8 +80,29 @@ function plan(){
 function sumAmounts(a){return Math.round(a.reduce(function(n,x){return n+x.amount},0)*100)/100}
 function skipHtml(a){
   if(!a.length)return '';
-  return '<details class="skipped"><summary>Pominięto '+a.length+' linii (sumy, obliczenia, godziny, tekst bez kwoty)</summary><ul>'+
-    a.slice(0,80).map(function(x){return '<li>'+esc(x.length>120?x.slice(0,120)+'…':x)+'</li>'}).join('')+(a.length>80?'<li>…i '+(a.length-80)+' kolejnych</li>':'')+'</ul></details>';
+  return '<details class="skipped" open><summary>Pominięto '+a.length+' linii (sumy, obliczenia, tekst bez kwoty). Chcesz którąś dodać? Wpisz kwotę, data i opis są opcjonalne.</summary><ul>'+
+    a.slice(0,200).map(function(x,i){
+      return '<li class="sk"><div class="skline">'+esc(x.length>160?x.slice(0,160)+'…':x)+'</div><div class="skform">'+
+        '<select class="sk-ty" aria-label="Rodzaj"><option value="loan">Pożyczka</option><option value="pay">Spłata</option></select>'+
+        '<input class="sk-am" type="text" inputmode="decimal" placeholder="Kwota" aria-label="Kwota">'+
+        '<input class="sk-dt" type="date" aria-label="Data (opcjonalnie)">'+
+        '<input class="sk-nt" maxlength="200" placeholder="Opis (opcjonalnie)" value="'+esc(x.slice(0,200))+'" aria-label="Opis"></div></li>';
+    }).join('')+(a.length>200?'<li>…i '+(a.length-200)+' kolejnych (pominięte w podglądzie)</li>':'')+'</ul></details>';
+}
+function manualRows(who){
+  var out=[],dd=(document.getElementById('idate')||{}).value||today();
+  document.querySelectorAll('#impOut .sk').forEach(function(li){
+    var am=parseFloat(li.querySelector('.sk-am').value.replace(/\s/g,'').replace(',','.'));
+    if(!(am>0))return;
+    var row={who:who,date:li.querySelector('.sk-dt').value||dd,type:li.querySelector('.sk-ty').value,amount:Math.round(am*100)/100};
+    var nt=li.querySelector('.sk-nt').value.trim();if(nt)row.note=nt;
+    out.push(row);
+  });
+  return out;
+}
+function refreshImpBtn(){
+  var b=document.getElementById('doImp');if(!b||b.disabled)return;
+  b.textContent='Importuj '+(IMP.length+manualRows('').length)+' wpisów';
 }
 function exportText(all){
   var list=all?S.debtors:[cur()].filter(Boolean);
@@ -139,7 +161,7 @@ document.addEventListener('click',async function(e){
   }
   else if(id==='prev'&&d){
     box=document.getElementById('impOut');
-    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked,hourlyRate:parseFloat(document.getElementById('hrate').value)||0});IMP=pr.rows;
+    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked,hourlyRate:parseFloat(document.getElementById('hrate').value)||0,defaultDate:document.getElementById('idate').value||undefined});IMP=pr.rows;
     if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „1500 zł klej” albo „01.10.2026 +500”.</p>'+skipHtml(pr.skip);return}
     var multi=document.getElementById('hdr').checked;
     var nl=IMP.filter(function(x){return x.type==='loan'}),np=IMP.filter(function(x){return x.type==='pay'});
@@ -152,17 +174,18 @@ document.addEventListener('click',async function(e){
       skipHtml(pr.skip)+
       '<div class="foot"><button class="btn" id="doImp">Importuj '+IMP.length+' wpisów</button></div>';
   }
-  else if(id==='doImp'&&IMP.length){
-    if(!confirm('Zaimportować '+IMP.length+' wpisów? Powtórny import tej samej notatki podwoi wpisy.'))return;
+  else if(id==='doImp'&&(IMP.length||document.querySelector('#impOut .sk-am'))){
+    var ALL=IMP.concat(manualRows(d?d.name:''));
+    if(!confirm('Zaimportować '+ALL.length+' wpisów? Powtórny import tej samej notatki podwoi wpisy.'))return;
     t.disabled=true;t.textContent='Importuję…';
     var byName={};S.debtors.forEach(function(z){byName[z.name.toLowerCase()]=z});
     var rows=[];
-    for(var i=0;i<IMP.length;i++){
-      var x=IMP[i],k=byName[x.who.toLowerCase()];
+    for(var i=0;i<ALL.length;i++){
+      var x=ALL[i],k=byName[x.who.toLowerCase()];
       if(!k){var r=await SB.from('debtors').insert({name:x.who,rate:0}).select().single();if(fail(r))return;k={id:r.data.id,name:r.data.name,rate:0,entries:[]};S.debtors.push(k);byName[x.who.toLowerCase()]=k}
       rows.push({debtor_id:k.id,type:x.type,date:x.date,amount:x.amount,note:x.note||null});
     }
-    var r2=await SB.from('entries').insert(rows);if(fail(r2)){t.disabled=false;t.textContent='Importuj '+IMP.length+' wpisów';return}
+    var r2=await SB.from('entries').insert(rows);if(fail(r2)){t.disabled=false;t.textContent='Importuj '+ALL.length+' wpisów';return}
     IMP=[];await load();
   }
   else if(id==='expOne'||id==='expAll'){
@@ -178,7 +201,7 @@ document.addEventListener('change',async function(e){
   if(e.target.id==='nm'){var v=e.target.value.trim();if(!v)return;var r=await SB.from('debtors').update({name:v}).eq('id',d.id);if(fail(r))return;d.name=v;render()}
   else if(e.target.id==='rt'){var v2=Math.max(0,parseFloat(e.target.value)||0);var r=await SB.from('debtors').update({rate:v2}).eq('id',d.id);if(fail(r))return;d.rate=v2;render()}
 });
-document.addEventListener('input',function(e){if(e.target.id==='mo')plan()});
+document.addEventListener('input',function(e){if(e.target.id==='mo')plan();else if(e.target.classList&&e.target.classList.contains('sk-am'))refreshImpBtn()});
 SB.auth.onAuthStateChange(function(ev,session){
   S.user=session?session.user:null;
   if(S.user)load();else{S.debtors=[];S.sel=null;render()}

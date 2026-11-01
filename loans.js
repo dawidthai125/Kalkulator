@@ -111,6 +111,7 @@
   function parseNotes(txt, flip, who, asOf, opts) {
     asOf = asOf || today();
     var headersAsDebtors = !(opts && opts.headersAsDebtors === false);
+    var defDate = (opts && opts.defaultDate && validDate(opts.defaultDate)) ? opts.defaultDate : asOf;
     var out = [], skip = [], mode = null, amountRe, hoursLines = 0;
     var rate = opts && +opts.hourlyRate > 0 ? +opts.hourlyRate : detectRate(txt);
     txt.split(/\r?\n/).forEach(function (l) {
@@ -119,7 +120,7 @@
       if (!s) { mode = null; return; }
 
       // Data: pełna (dd.mm.rrrr, rrrr-mm-dd) albo bez roku (dd.mm)
-      var date = asOf, dm = s.match(/(\d{4})-(\d{2})-(\d{2})|(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4}|\d{2})/);
+      var date = defDate, dm = s.match(/(\d{4})-(\d{2})-(\d{2})|(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4}|\d{2})/);
       if (dm) {
         if (dm[1]) date = dm[0];
         else date = (dm[6].length === 2 ? '20' + dm[6] : dm[6]) + '-' + pad2(+dm[5]) + '-' + pad2(+dm[4]);

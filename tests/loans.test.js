@@ -266,3 +266,9 @@ test('parseNotes: stawka z opcji ma pierwszeństwo, a bez stawki godziny są pom
   const r = P('45h wypłata');
   assert.equal(r.rows.length, 0); assert.equal(r.skip.length, 1);
 });
+
+test('parseNotes: defaultDate dostają tylko wpisy bez daty, a data bez roku liczy się od dziś', () => {
+  const r = P('100 zł paliwo\n24500 zł (27.05)\n50 zł 03.10.2026', { defaultDate: '2026-05-08' });
+  assert.deepEqual(r.rows.map(x => x.date), ['2026-05-08', '2026-05-27', '2026-10-03']);
+  assert.equal(P('100 zł x', { defaultDate: '2026-02-30' }).rows[0].date, '2026-11-01');
+});
