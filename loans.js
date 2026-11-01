@@ -67,31 +67,123 @@
 
   // Zwraca { rows: [{ who, date, type, amount }], skip: [linie bez kwoty] }.
   // who = domyślny dłużnik; linia bez kwoty i bez cyfr zmienia dłużnika dla kolejnych wpisów.
-  function parseNotes(txt, flip, who, asOf) {
-    var out = [], skip = [];
+  var LET = 'A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż';
+  var CUR_SRC = '(?:z[łl]|pln)(?![' + LET + '])';
+  var NUM_SRC = '\\d{1,3}(?:[ \\u00a0.]\\d{3})+(?:,\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?';
+  var AMOUNT_SRC = '(^|[^' + LET + '\\d])([+\\-\\u2212\\u2013])?(' + NUM_SRC + ')(?!\\d)(\\s*' + CUR_SRC + ')?(\\s*h(?![' + LET + ']))?';
+  var SUMMARY_START = new RegExp('^(razem|suma|sumy|całość|calosc|do zapłaty|do zaplaty|zostało|zostalo|było|bylo|jest|poprzednio|godziny)(?![' + LET + '])', 'i');
+  var PAY_HEADER = /(faktur\w*\s+wp[łl]at|wp[łl]at\w*\s+faktur|przelew\w*\s+otrzyman|wp[łl]yw\w*\s+na\s+konto|zwrot\w*)/i;
+
+  function toNumber(raw) {
+    var num = (/[  ]/.test(raw) || /\.\d{3}/.test(raw)) ? raw.replace(/[  .]/g, '').replace(',', '.') : raw.replace(',', '.');
+    return parseFloat(num);
+  }
+
+  // Data bez roku ("27.05") dostaje rok z asOf; jeśli wychodzi w przyszłości, to rok wcześniejszy.
+  function shortDate(dd, mm, asOf) {
+    var y = +asOf.slice(0, 4), iso = y + '-' + pad2(+mm) + '-' + pad2(+dd);
+    if (!validDate(iso)) return null;
+    if (iso > asOf) { y -= 1; iso = y + '-' + pad2(+mm) + '-' + pad2(+dd); if (!validDate(iso)) return null; }
+    return iso;
+  }
+
+  function cleanNote(txt) {
+    var n = txt.replace(/\(\s*(?:r\.?)?\s*\)/g, ' ').replace(/(^|\s)r\.(?=\s|$)/g, ' ')
+      .replace(new RegExp('(^|[^' + LET + '])' + CUR_SRC, 'gi'), '$1')
+      .replace(/^[\s:;,.\-–−()]+|[\s:;,\-–−(]+$/g, '')
+      .replace(/\s+/g, ' ').trim();
+    return n.length > 200 ? n.slice(0, 200).trim() : n;
+  }
+
+  // Rozumie notatki w stylu: "1500 zł klej", "-200 zł", sekcje "Faktury wpłaty:" (spłaty), pomija sumy i obliczenia.
+  //  - kwota ze znakiem "-" lub w sekcji spłat = spłata, w pozostałych przypadkach pożyczka (dług)
+  //  - opts.headersAsDebtors: linia bez kwoty (np. "Jan Kowalski:") zmienia dłużnika (domyślnie włączone, jak dawniej)
+  // Zwraca { rows: [{ who, date, type, amount, note? }], skip: [linie pominięte] }
+  function parseNotes(txt, flip, who, asOf, opts) {
+    asOf = asOf || today();
+    var headersAsDebtors = !(opts && opts.headersAsDebtors === false);
+    var out = [], skip = [], mode = null, amountRe;
     txt.split(/\r?\n/).forEach(function (l) {
-      var s = l.trim(); if (!s) return;
-      var dm = s.match(/(\d{4})-(\d{2})-(\d{2})|(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4}|\d{2})/), date = asOf || today();
+      var orig = l.trim();
+      var s = l.replace(/[​-‏⁠﻿￼]/g, '').trim();
+      if (!s) { mode = null; return; }
+
+      // Data: pełna (dd.mm.rrrr, rrrr-mm-dd) albo bez roku (dd.mm)
+      var date = asOf, dm = s.match(/(\d{4})-(\d{2})-(\d{2})|(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4}|\d{2})/);
       if (dm) {
         if (dm[1]) date = dm[0];
-        else {
-          var y = dm[6].length === 2 ? '20' + dm[6] : dm[6];
-          date = y + '-' + ('0' + dm[5]).slice(-2) + '-' + ('0' + dm[4]).slice(-2);
+        else date = (dm[6].length === 2 ? '20' + dm[6] : dm[6]) + '-' + pad2(+dm[5]) + '-' + pad2(+dm[4]);
+        if (!validDate(date)) { skip.push(orig); return; }
+        s = s.slice(0, dm.index) + ' '.repeat(dm[0].length) + s.slice(dm.index + dm[0].length);
+      } else {
+        var sm = new RegExp('(^|[^\\d.,])(\\d{1,2})\\.(\\d{1,2})(?![\\d.,]|\\s*' + CUR_SRC + ')', 'i').exec(s);
+        var sd = sm && shortDate(sm[2], sm[3], asOf);
+        if (sd) {
+          date = sd;
+          var at = sm.index + sm[1].length, len = sm[0].length - sm[1].length;
+          s = s.slice(0, at) + ' '.repeat(len) + s.slice(at + len);
         }
-        s = s.replace(dm[0], ' ');
-        if (!validDate(date)) { skip.push(l.trim()); return; }
       }
-      var am = s.match(/([+\-−–])?\s*(\d{1,3}(?:[  .]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/);
-      if (!am) {
-        var h = s.replace(/[:\-–]+$/, '').trim();
-        if (h && !/\d/.test(h)) who = h; else skip.push(l.trim());
+
+      // Do wykrywania kwot kody typu "PIT-28" nie są liczbami
+      var scan = s.replace(/[A-Za-z]+-\d+/g, function (m) { return ' '.repeat(m.length); });
+      var exportLike = /^\s*\d{2}\.\d{2}\.\d{4}\s+[+\-−–]\d/.test(orig);
+
+      var amount = null, neg = false, note = '';
+
+      // Mnożenie "45h x 40 = 1800 zł": liczy się wynik
+      var mult = /(?:\d\s*h?|\s)x\s*\d+/i.test(scan) && !/\+/.test(scan) && (scan.match(/=/g) || []).length === 1 &&
+        new RegExp('=\\s*(' + NUM_SRC + ')\\s*(?:' + CUR_SRC + ')?\\s*$', 'i').exec(scan);
+      if (mult && !exportLike) {
+        amount = toNumber(mult[1]);
+        note = cleanNote(s.slice(0, scan.indexOf('=')));
+      } else {
+        if (!exportLike && (/=/.test(scan) || new RegExp('\\d\\s*(?:' + CUR_SRC + ')?\\s*h?\\s*\\+\\s*\\(?\\s*\\d', 'i').test(scan))) {
+          skip.push(orig); return;   // suma lub obliczenie
+        }
+        amountRe = new RegExp(AMOUNT_SRC, 'gi');
+        var cands = [], m;
+        while ((m = amountRe.exec(scan)) !== null) {
+          var start = m.index + m[1].length, end = m.index + m[0].length;
+          var v = toNumber(m[3]);
+          if (!(v > 0) || m[5] || /^\/\d/.test(scan.slice(end))) continue;   // godziny, ułamki "20/2", zera
+          cands.push({ sign: m[2] || '', v: v, cur: !!m[4], start: start, end: end });
+        }
+        var pick = cands.filter(function (c) { return c.sign; })[0] ||
+          cands.filter(function (c) { return c.cur; })[0];
+        if (!pick) {
+          var bare = cands.filter(function (c) { return c.v >= 10; });
+          if (cands.length === 1 && bare.length === 1) pick = bare[0];
+        }
+        var head = s.replace(/[:\-–]+$/, '').trim();
+
+        if (!pick) {
+          if (cands.length || /\d/.test(head)) { skip.push(orig); return; }   // liczba, ale nie wiadomo która
+          if (!head) { skip.push(orig); return; }
+          // Linia bez cyfr: nagłówek sekcji albo dłużnik
+          if (SUMMARY_START.test(head)) mode = 'skip';
+          else if (PAY_HEADER.test(head)) mode = 'pay';
+          else { mode = null; if (headersAsDebtors) who = head; }
+          return;
+        }
+        if (SUMMARY_START.test(head) || mode === 'skip') { skip.push(orig); return; }
+        amount = pick.v;
+        neg = !!pick.sign && pick.sign !== '+';
+        if (mode === 'pay' && pick.sign !== '+') neg = true;
+        note = cleanNote(s.slice(0, pick.start) + ' ' + s.slice(pick.end));
+        if (/^(koszty|razem|suma|łącznie|całość|total)$/i.test(note)) { skip.push(orig); return; }
+        if (flip) neg = !neg;
+        var row = { who: who, date: date, type: neg ? 'pay' : 'loan', amount: Math.round(amount * 100) / 100 };
+        if (note) row.note = note;
+        out.push(row);
         return;
       }
-      var raw = am[2],
-        num = (/[  ]/.test(raw) || /\.\d{3}/.test(raw)) ? raw.replace(/[  .]/g, '').replace(',', '.') : raw.replace(',', '.');
-      var v = parseFloat(num); if (!(v > 0)) { skip.push(l.trim()); return; }
-      var neg = !!am[1] && am[1] !== '+'; if (flip) neg = !neg;
-      out.push({ who: who, date: date, type: neg ? 'pay' : 'loan', amount: Math.round(v * 100) / 100 });
+      // gałąź mnożenia
+      if (!(amount > 0)) { skip.push(orig); return; }
+      if (flip) neg = !neg;
+      var r2 = { who: who, date: date, type: neg ? 'pay' : 'loan', amount: Math.round(amount * 100) / 100 };
+      if (note) r2.note = note;
+      out.push(r2);
     });
     return { rows: out, skip: skip };
   }

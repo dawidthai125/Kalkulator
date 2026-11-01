@@ -59,9 +59,10 @@ function render(){
   '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'<p class="msg"></p></div>'+
   '<div class="card"><h2>Plan rat dla pozostałego kapitału</h2><div class="row"><label>Liczba miesięcy<input id="mo" type="number" min="1" step="1" value="12" inputmode="numeric"></label>'+
   '<label>Rata miesięczna<input id="rata" readonly></label></div></div>'+
-  '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota z plusem to pożyczka, z minusem to spłata. Linia bez kwoty (np. „Jan Kowalski:”) przypisuje kolejne wpisy do tego dłużnika.</p>'+
+  '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota bez znaku to dług (pożyczka). Spłatą jest kwota z minusem oraz linie pod nagłówkiem „Faktury wpłaty:” lub „Przelewy otrzymane” (do pustej linii). Reszta linii po kwocie trafia do opisu. Sumy, obliczenia (=, +) i godziny są pomijane, a ich listę zobaczysz w podglądzie.</p>'+
   '<textarea id="imptxt" placeholder="Jan Kowalski:&#10;01.10.2026 +500&#10;15.10.2026 -200 zł"></textarea>'+
   '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px"><input type="checkbox" id="flip" style="width:auto;min-height:0">Odwróć znaki (plus = spłata, minus = pożyczka)</label>'+
+  '<label style="display:flex;gap:8px;align-items:center;margin:0 0 10px;font-size:14px"><input type="checkbox" id="hdr" style="width:auto;min-height:0">Linia bez kwoty to nazwa dłużnika (np. „Jan Kowalski:”)</label>'+
   '<button class="btn" id="prev">Podgląd importu</button><div id="impOut" class="imp"></div></div>'+
   '<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
@@ -74,10 +75,16 @@ function plan(){
   o.value=fmt.format(Loans.monthlyPayment(c.cap+c.int,d.rate,n));
 }
 
+function sumAmounts(a){return Math.round(a.reduce(function(n,x){return n+x.amount},0)*100)/100}
+function skipHtml(a){
+  if(!a.length)return '';
+  return '<details class="skipped"><summary>Pominięto '+a.length+' linii (sumy, obliczenia, godziny, tekst bez kwoty)</summary><ul>'+
+    a.slice(0,80).map(function(x){return '<li>'+esc(x.length>120?x.slice(0,120)+'…':x)+'</li>'}).join('')+(a.length>80?'<li>…i '+(a.length-80)+' kolejnych</li>':'')+'</ul></details>';
+}
 function exportText(all){
   var list=all?S.debtors:[cur()].filter(Boolean);
   return list.map(function(d){
-    return d.name+':\n'+calc(d).sorted.map(function(e){var p=e.date.split('-');return p[2]+'.'+p[1]+'.'+p[0]+' '+(e.type==='loan'?'+':'-')+e.amount.toFixed(2).replace('.',',')}).join('\n');
+    return d.name+':\n'+calc(d).sorted.map(function(e){var p=e.date.split('-');return p[2]+'.'+p[1]+'.'+p[0]+' '+(e.type==='loan'?'+':'-')+e.amount.toFixed(2).replace('.',',')+(e.note?' '+e.note:'')}).join('\n');
   }).join('\n\n');
 }
 
@@ -131,22 +138,29 @@ document.addEventListener('click',async function(e){
   }
   else if(id==='prev'&&d){
     box=document.getElementById('impOut');
-    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name);IMP=pr.rows;
-    if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „01.10.2026 +500”.</p>';return}
-    box.innerHTML='<div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Dłużnik</th><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+
-      IMP.map(function(x){return '<tr><td>'+esc(x.who)+'</td><td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
-      (pr.skip.length?'<p class="sub" style="margin-top:10px">Pominięto '+pr.skip.length+' linii bez poprawnej kwoty lub daty.</p>':'')+
+    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked});IMP=pr.rows;
+    if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „1500 zł klej” albo „01.10.2026 +500”.</p>'+skipHtml(pr.skip);return}
+    var multi=document.getElementById('hdr').checked;
+    var nl=IMP.filter(function(x){return x.type==='loan'}),np=IMP.filter(function(x){return x.type==='pay'});
+    var sl=sumAmounts(nl),sp=sumAmounts(np);
+    box.innerHTML='<div class="grid" style="margin-top:12px"><div>Długi (pożyczki), '+nl.length+' wpisów<b class="neg">'+fmt.format(sl)+'</b></div><div>Spłaty, '+np.length+' wpisów<b class="pos">'+fmt.format(sp)+'</b></div></div>'+
+      '<p class="sub" style="margin-top:8px">Saldo po imporcie (bez odsetek): <strong class="'+(sl-sp>0?'neg':'pos')+'">'+fmt.format(sl-sp)+'</strong></p>'+
+      '<div class="tablewrap"><table><thead><tr>'+(multi?'<th>Dłużnik</th>':'')+'<th>Data</th><th>Rodzaj i opis</th><th class="n">Kwota</th></tr></thead><tbody>'+
+      IMP.map(function(x){return '<tr>'+(multi?'<td>'+esc(x.who)+'</td>':'')+'<td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+(x.note?'<span class="note">'+esc(x.note)+'</span>':'')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
+      skipHtml(pr.skip)+
       '<div class="foot"><button class="btn" id="doImp">Importuj '+IMP.length+' wpisów</button></div>';
   }
   else if(id==='doImp'&&IMP.length){
+    if(!confirm('Zaimportować '+IMP.length+' wpisów? Powtórny import tej samej notatki podwoi wpisy.'))return;
+    t.disabled=true;t.textContent='Importuję…';
     var byName={};S.debtors.forEach(function(z){byName[z.name.toLowerCase()]=z});
     var rows=[];
     for(var i=0;i<IMP.length;i++){
       var x=IMP[i],k=byName[x.who.toLowerCase()];
       if(!k){var r=await SB.from('debtors').insert({name:x.who,rate:0}).select().single();if(fail(r))return;k={id:r.data.id,name:r.data.name,rate:0,entries:[]};S.debtors.push(k);byName[x.who.toLowerCase()]=k}
-      rows.push({debtor_id:k.id,type:x.type,date:x.date,amount:x.amount});
+      rows.push({debtor_id:k.id,type:x.type,date:x.date,amount:x.amount,note:x.note||null});
     }
-    var r2=await SB.from('entries').insert(rows);if(fail(r2))return;
+    var r2=await SB.from('entries').insert(rows);if(fail(r2)){t.disabled=false;t.textContent='Importuj '+IMP.length+' wpisów';return}
     IMP=[];await load();
   }
   else if(id==='expOne'||id==='expAll'){

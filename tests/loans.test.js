@@ -176,3 +176,80 @@ test('parseNotes: 29 lutego tylko w roku przestępnym', () => {
   assert.deepEqual(r.rows.map(x => x.date), ['2028-02-29']);
   assert.equal(r.skip.length, 1);
 });
+
+// --- Import w stylu notatki "kwota opis": dług bez znaku, spłaty w sekcjach, sumy pomijane ---
+const P = (txt, opts, flip = false) => L.parseNotes(txt, flip, 'Znajomy', '2026-11-01', opts);
+
+test('parseNotes: kwota z walutą bez znaku to dług, reszta linii to opis', () => {
+  const r = P('1500 zł klej do wykładzin\n6000zl - płyty indukcyjne\nZUS 3421,80');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.note]),
+    [['loan', 1500, 'klej do wykładzin'], ['loan', 6000, 'płyty indukcyjne'], ['loan', 3421.8, 'ZUS']]);
+});
+
+test('parseNotes: sekcja "Faktury wpłaty:" to spłaty do pustej linii', () => {
+  const r = P('Faktury wpłaty:\n24500 zł (27.05)\n20000 zł\n\n100 zł paliwo');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.date]),
+    [['pay', 24500, '2026-05-27'], ['pay', 20000, '2026-11-01'], ['loan', 100, '2026-11-01']]);
+  assert.equal(r.skip.length, 0);
+});
+
+test('parseNotes: sekcja "Przelewy otrzymane" i minus przy kwocie z datą', () => {
+  const r = P('Przelewy otrzymane w październiku\n38600 zł\n\nFaktura -21500 zł (19.06.2026r.)');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.date, x.note || '']),
+    [['pay', 38600, '2026-11-01', ''], ['pay', 21500, '2026-06-19', 'Faktura']]);
+});
+
+test('parseNotes: z kilku liczb wybiera kwotę z walutą', () => {
+  const r = P('3 parapety 680 zł\nKamery 2 szt 740 zł\n600 zł - 12 szt nawiewników po 50 zł');
+  assert.deepEqual(r.rows.map(x => x.amount), [680, 740, 600]);
+});
+
+test('parseNotes: pomija sumy, obliczenia, godziny, ułamki i nagłówki podsumowań', () => {
+  const r = P('115 217 zł + 43 777zł = 186 994 zł\n45h wypłata\nRazem 3213 zł\nDo zapłaty 187 094 zł + 423h\nObornicka 20/2\nZaliczki Adam 150+50+50\nWycieraczki 60 i 40 Dacia');
+  assert.equal(r.rows.length, 0);
+  assert.equal(r.skip.length, 7);
+});
+
+test('parseNotes: nagłówek "Całość" wyłącza sekcję do pustej linii', () => {
+  const r = P('Całość\n177 609 zł\n\n100 zł paliwo');
+  assert.deepEqual(r.rows.map(x => x.amount), [100]);
+  assert.equal(r.skip.length, 1);
+});
+
+test('parseNotes: mnożenie "45h x 40 = 1800 zł" daje wynik jako dług', () => {
+  const r = P('Wypłata Dawid 45hx40 = 1800 zł\n45 x 40 = 1800');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount]), [['loan', 1800], ['loan', 1800]]);
+});
+
+test('parseNotes: kod "PIT-28" nie jest kwotą ze znakiem minus', () => {
+  const r = P('PIT-28  6949,00');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.note]), [['loan', 6949, 'PIT-28']]);
+});
+
+test('parseNotes: podsumowanie jako sam opis ("- koszty") jest pomijane', () => {
+  const r = P('54900 zł  - koszty\n100 zł paliwo');
+  assert.deepEqual(r.rows.map(x => x.amount), [100]);
+  assert.equal(r.skip.length, 1);
+});
+
+test('parseNotes: headersAsDebtors=false ignoruje nagłówki i zostawia dłużnika', () => {
+  const r = P('Gotówka wypłacona :\n25000 zł', { headersAsDebtors: false });
+  assert.deepEqual(r.rows.map(x => [x.who, x.amount]), [['Znajomy', 25000]]);
+  assert.equal(r.skip.length, 0);
+});
+
+test('parseNotes: domyślnie nagłówek bez kwoty to dłużnik (zgodność wstecz)', () => {
+  const r = P('Jan:\n100 zł x');
+  assert.equal(r.rows[0].who, 'Jan');
+});
+
+test('parseNotes: data bez roku z przyszłości dostaje rok poprzedni', () => {
+  const r = P('15.12 100 zł\n10.03 50 zł');
+  assert.deepEqual(r.rows.map(x => x.date), ['2025-12-15', '2026-03-10']);
+});
+
+test('parseNotes: format eksportu (data, znak, kwota, opis z cyframi) wraca bez zmian', () => {
+  const r = P('15.10.2026 +500,00 przelew za 3 raty\n16.10.2026 -200,00 zwrot');
+  assert.deepEqual(r.rows.map(x => [x.type, x.amount, x.date, x.note]),
+    [['loan', 500, '2026-10-15', 'przelew za 3 raty'], ['pay', 200, '2026-10-16', 'zwrot']]);
+});
