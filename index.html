@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pożyczki i spłaty</title>
+<title>Dłużnik 2.0</title>
 <meta name="theme-color" content="#0f6b57">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Pożyczki">
+<meta name="apple-mobile-web-app-title" content="Dłużnik 2.0">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
@@ -31,6 +31,8 @@ h2{font-size:15px;margin:0 0 10px;color:var(--mute);font-weight:600}
 .row{display:flex;gap:10px;flex-wrap:wrap}
 .row>label{flex:1 1 120px;display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:4px}
 textarea{min-height:120px;resize:vertical}
+.brand{display:flex;align-items:center;gap:10px}.brand img{border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.credit{margin:28px 0 0;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;line-height:1.5;color:var(--mute);text-align:center}.credit b{color:var(--ink)}
 .remind{border-color:var(--warn);border-width:2px}
 .filepick{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mute);margin-bottom:8px}
 .imp td{white-space:normal}.imp td:first-child,.imp td.n{white-space:nowrap}
@@ -69,10 +71,11 @@ td.n,th.n{text-align:right}
 </head>
 <body>
 <main>
-  <div class="bar"><h1>Pożyczki i spłaty</h1></div>
+  <div class="bar"><h1 class="brand"><img src="icon-192.png" alt="" width="40" height="40">Dłużnik 2.0</h1></div>
   <div id="bar" class="bar" style="margin-bottom:10px"></div>
   <div class="tabs" id="tabs" role="tablist"></div>
   <div id="panel"></div>
+  <p class="credit">System <b>Dłużnik 2.0</b> stworzył <b>Dawid Thai Thanh</b> na potrzeby<br>„Jak zapomnisz, ile pożyczyłeś, to stracisz”.<br>Projekt finansowany z funduszy własnych, a już się kończą. 🪙</p>
 </main>
 <script src="vendor/supabase.js"></script>
 <script src="loans.js"></script>

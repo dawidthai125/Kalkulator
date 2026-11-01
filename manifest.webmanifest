@@ -1,6 +1,6 @@
 {
-  "name": "Pożyczki i spłaty",
-  "short_name": "Pożyczki",
+  "name": "Dłużnik 2.0",
+  "short_name": "Dłużnik 2.0",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
