@@ -6,7 +6,23 @@
   else root.Loans = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
 
-  function today() { return new Date().toISOString().slice(0, 10); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // Dzień według czasu lokalnego (toISOString dałoby UTC: po północy w Polsce wczorajszą datę).
+  function localDate(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+
+  function today() { return localDate(new Date()); }
+
+  // Zaokrąglenie do groszy; "+ 0" zamienia -0 na 0.
+  function money(x) { return Math.round(x * 100) / 100 + 0; }
+
+  // Czy 'RRRR-MM-DD' to istniejąca data kalendarzowa (np. nie 2026-02-30).
+  function validDate(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return false;
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+  }
 
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
@@ -37,7 +53,8 @@
       }
     });
     if (last && cap > 0) int += cap * r * Math.max(0, days(last, asOf || today()));
-    return { cap: cap, int: int, owed: cap + int - over, lent: lent, paid: paid, sorted: ev };
+    // Zaokrąglamy dopiero na końcu (w trakcie liczymy na pełnej precyzji).
+    return { cap: money(cap), int: money(int), owed: money(cap + int - over), lent: money(lent), paid: money(paid), sorted: ev };
   }
 
   // Rata miesięczna (annuitetowa) dla kwoty P, rocznej stopy rate (%) i n miesięcy.
@@ -62,6 +79,7 @@
           date = y + '-' + ('0' + dm[5]).slice(-2) + '-' + ('0' + dm[4]).slice(-2);
         }
         s = s.replace(dm[0], ' ');
+        if (!validDate(date)) { skip.push(l.trim()); return; }
       }
       var am = s.match(/([+\-−–])?\s*(\d{1,3}(?:[  .]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/);
       if (!am) {
@@ -78,5 +96,5 @@
     return { rows: out, skip: skip };
   }
 
-  return { today: today, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes };
+  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes };
 });
