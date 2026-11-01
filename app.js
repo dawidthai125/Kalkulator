@@ -1,9 +1,9 @@
 var SB=supabase.createClient('https://ukpfrkjikqffojzpdywk.supabase.co','sb_publishable_9coMWsPQsvFtIwNRVEXPiQ_VVyFT8r_');
-var S={debtors:[],sel:null,user:null},IMP=[];
+var S={debtors:[],sel:null,user:null,editId:null},IMP=[];
 var fmt=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 var today=Loans.today,esc=Loans.esc,calc=Loans.calc,parseNotes=Loans.parseNotes;
 function cur(){return S.debtors.find(function(d){return d.id===S.sel})}
-function toast(m){var x=document.getElementById('msg');if(x)x.textContent=m||''}
+function toast(m){document.querySelectorAll('.msg').forEach(function(x){x.textContent=m||''})}
 function fail(r){if(r&&r.error){toast('Błąd: '+r.error.message);return true}return false}
 
 async function load(){
@@ -35,17 +35,26 @@ function render(){
   var d=cur();
   if(!d){p.innerHTML='<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
   var c=calc(d),rows=c.sorted.map(function(e){
-    return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n">'+fmt.format(e.amount)+'</td><td><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>'}).join('');
+    if(S.editId===e.id){
+      return '<tr class="edit"><td colspan="4"><div class="editrow">'+
+        '<input id="ed-dt" type="date" value="'+esc(e.date)+'" aria-label="Data">'+
+        '<select id="ed-ty" aria-label="Rodzaj"><option value="loan"'+(e.type==='loan'?' selected':'')+'>Pożyczka</option><option value="pay"'+(e.type==='pay'?' selected':'')+'>Spłata</option></select>'+
+        '<input id="ed-am" type="number" min="0" step="0.01" inputmode="decimal" value="'+e.amount+'" aria-label="Kwota (zł)">'+
+        '<span class="act"><button class="x" data-save="'+e.id+'" aria-label="Zapisz zmiany">✓</button><button class="x" data-cancel="1" aria-label="Anuluj edycję">✕</button></span></div></td></tr>';
+    }
+    return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
+      '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
+  }).join('');
   p.innerHTML=
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label>'+
   '<label>Oprocentowanie roczne (%)<input id="rt" type="number" min="0" step="0.1" inputmode="decimal" value="'+(d.rate||0)+'"></label></div><p class="msg" id="msg"></p></div>'+
-  '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
-  '<div class="grid"><div>Kapitał do spłaty<b>'+fmt.format(c.cap)+'</b></div><div>Naliczone odsetki<b>'+fmt.format(c.int)+'</b></div>'+
-  '<div>Łącznie pożyczono<b>'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b>'+fmt.format(c.paid)+'</b></div></div></div>'+
+  '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
+  '<div class="grid"><div>Kapitał do spłaty<b class="'+(c.cap>0?'neg':'')+'">'+fmt.format(c.cap)+'</b></div><div>Naliczone odsetki<b class="'+(c.int>0?'neg':'')+'">'+fmt.format(c.int)+'</b></div>'+
+  '<div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
   '<div class="card"><h2>Dodaj wpis</h2><div class="row"><label>Rodzaj<select id="ty"><option value="loan">Pożyczka</option><option value="pay">Spłata</option></select></label>'+
   '<label>Data<input id="dt" type="date" value="'+today()+'"></label><label>Kwota (zł)<input id="am" type="number" min="0" step="0.01" inputmode="decimal"></label></div>'+
   '<div class="foot"><button class="btn" id="addE">Dodaj wpis</button></div></div>'+
-  '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'</div>'+
+  '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'<p class="msg"></p></div>'+
   '<div class="card"><h2>Plan rat dla pozostałego kapitału</h2><div class="row"><label>Liczba miesięcy<input id="mo" type="number" min="1" step="1" value="12" inputmode="numeric"></label>'+
   '<label>Rata miesięczna<input id="rata" readonly></label></div></div>'+
   '<div class="card"><h2>Import z Notatek (iPhone)</h2><p class="sub">W Notatkach zaznacz tekst, wybierz Kopiuj i wklej tutaj. Kwota z plusem to pożyczka, z minusem to spłata. Linia bez kwoty (np. „Jan Kowalski:”) przypisuje kolejne wpisy do tego dłużnika.</p>'+
@@ -87,7 +96,7 @@ document.addEventListener('click',async function(e){
     if(fail(ru))return;
     S.user=ru.data.user;await load();
   }
-  else if(t.dataset.id){S.sel=t.dataset.id;render()}
+  else if(t.dataset.id){S.sel=t.dataset.id;S.editId=null;render()}
   else if(id==='addD'){
     var r=await SB.from('debtors').insert({name:'Dłużnik '+(S.debtors.length+1),rate:0}).select().single();
     if(fail(r))return; S.debtors.push({id:r.data.id,name:r.data.name,rate:0,entries:[]});S.sel=r.data.id;render();
@@ -100,6 +109,16 @@ document.addEventListener('click',async function(e){
     var r=await SB.from('entries').insert(row).select().single(); if(fail(r))return;
     d.entries.push({id:r.data.id,type:row.type,date:row.date,amount:row.amount});render();
   }
+  else if(t.dataset.edit){S.editId=t.dataset.edit;render()}
+  else if(t.dataset.cancel){S.editId=null;render()}
+  else if(t.dataset.save&&d){
+    var ea=parseFloat(document.getElementById('ed-am').value),edt=document.getElementById('ed-dt').value,ety=document.getElementById('ed-ty').value;
+    if(!(ea>0)||!edt){toast('Podaj datę i kwotę większą od zera.');return}
+    var chg={type:ety,date:edt,amount:Math.round(ea*100)/100};
+    var rs=await SB.from('entries').update(chg).eq('id',t.dataset.save);if(fail(rs))return;
+    var en=d.entries.find(function(x){return x.id===t.dataset.save});if(en)Object.assign(en,chg);
+    S.editId=null;render();
+  }
   else if(t.dataset.del&&d){var r=await SB.from('entries').delete().eq('id',t.dataset.del);if(fail(r))return;d.entries=d.entries.filter(function(x){return x.id!==t.dataset.del});render()}
   else if(id==='delD'&&d){
     if(!confirm('Usunąć dłużnika „'+d.name+'” wraz z historią?'))return;
@@ -111,7 +130,7 @@ document.addEventListener('click',async function(e){
     var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name);IMP=pr.rows;
     if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „01.10.2026 +500”.</p>';return}
     box.innerHTML='<div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Dłużnik</th><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+
-      IMP.map(function(x){return '<tr><td>'+esc(x.who)+'</td><td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
+      IMP.map(function(x){return '<tr><td>'+esc(x.who)+'</td><td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
       (pr.skip.length?'<p class="sub" style="margin-top:10px">Pominięto '+pr.skip.length+' linii bez poprawnej kwoty lub daty.</p>':'')+
       '<div class="foot"><button class="btn" id="doImp">Importuj '+IMP.length+' wpisów</button></div>';
   }

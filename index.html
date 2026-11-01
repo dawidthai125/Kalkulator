@@ -4,12 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pożyczki i spłaty</title>
+<meta name="theme-color" content="#0f6b57">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pożyczki">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap">
 <style>
-:root{--bg:#f3f5f4;--card:#fff;--ink:#14231f;--mute:#5f726c;--line:#d9e1de;--acc:#0f6b57;--acc-ink:#fff;--warn:#b4492f;--ok:#0f6b57;
+:root{--bg:#f3f5f4;--card:#fff;--ink:#14231f;--mute:#5f726c;--line:#d9e1de;--acc:#0f6b57;--acc-ink:#fff;--warn:#b4492f;--ok:#0f6b57;--debt:#c62828;--paid:#1b7f3b;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1715;--card:#16221f;--ink:#e6efec;--mute:#93a8a1;--line:#27382f;--acc:#4cc2a4;--acc-ink:#07201a;--warn:#ef8f74;--ok:#4cc2a4}}
-:root[data-theme="dark"]{--bg:#0e1715;--card:#16221f;--ink:#e6efec;--mute:#93a8a1;--line:#27382f;--acc:#4cc2a4;--acc-ink:#07201a;--warn:#ef8f74;--ok:#4cc2a4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1715;--card:#16221f;--ink:#e6efec;--mute:#93a8a1;--line:#27382f;--acc:#4cc2a4;--acc-ink:#07201a;--warn:#ef8f74;--ok:#4cc2a4;--debt:#ff7b72;--paid:#4cd68a}}
+:root[data-theme="dark"]{--bg:#0e1715;--card:#16221f;--ink:#e6efec;--mute:#93a8a1;--line:#27382f;--acc:#4cc2a4;--acc-ink:#07201a;--warn:#ef8f74;--ok:#4cc2a4;--debt:#ff7b72;--paid:#4cd68a}
 *{box-sizing:border-box}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Figtree,system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -38,8 +46,13 @@ button{font:inherit;cursor:pointer}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td.n,th.n{text-align:right}
-.loan{color:var(--warn);font-weight:600}.pay{color:var(--ok);font-weight:600}
-.x{background:none;border:0;color:var(--mute);font-size:18px;padding:2px 8px}
+.loan{color:var(--debt);font-weight:600}.pay{color:var(--paid);font-weight:600}
+.neg,.grid b.neg{color:var(--debt)}.pos,.grid b.pos{color:var(--paid)}
+.act{white-space:nowrap;text-align:right}
+.editrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;white-space:normal}
+.editrow input,.editrow select{flex:1 1 120px;width:auto;min-width:0;min-height:40px;padding:6px 8px}
+.editrow .act{flex:0 0 auto}
+.x{background:none;border:0;color:var(--mute);font-size:18px;padding:8px 10px;min-width:40px}
 .empty{color:var(--mute);margin:0}
 .bar{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .msg{color:var(--warn);font-size:14px;margin:10px 0 0}
