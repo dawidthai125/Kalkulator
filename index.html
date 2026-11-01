@@ -94,6 +94,14 @@ function render(){
     '<div class="row" style="margin-top:12px"><button class="btn" id="login">Zaloguj</button><button class="btn ghost" id="signup" style="color:var(--acc)">Załóż konto</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
+  if(S.user.user_metadata&&S.user.user_metadata.must_change_password){
+    t.innerHTML='';
+    bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button>';
+    p.innerHTML='<div class="card"><h2>Ustaw własne hasło</h2><p class="sub">Logujesz się hasłem tymczasowym. Ustaw nowe hasło, aby korzystać z aplikacji.</p>'+
+    '<div class="row"><label>Nowe hasło (min. 8 znaków)<input id="pw1" type="password" autocomplete="new-password"></label><label>Powtórz hasło<input id="pw2" type="password" autocomplete="new-password"></label></div>'+
+    '<div class="foot"><button class="btn" id="setpw">Zapisz hasło</button></div><p class="msg" id="msg"></p></div>';
+    return;
+  }
   bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
@@ -159,6 +167,15 @@ document.addEventListener('click',async function(e){
     if(id==='signup'&&!r.data.session)toast('Konto utworzone. Potwierdź adres e-mail w wiadomości i zaloguj się.');
   }
   else if(id==='logout'){await SB.auth.signOut()}
+  else if(id==='setpw'){
+    var p1=document.getElementById('pw1').value,p2=document.getElementById('pw2').value;
+    if(p1.length<8){toast('Hasło musi mieć co najmniej 8 znaków.');return}
+    if(p1==='test12345'){toast('Wybierz inne hasło niż tymczasowe.');return}
+    if(p1!==p2){toast('Hasła nie są takie same.');return}
+    var ru=await SB.auth.updateUser({password:p1,data:{must_change_password:false}});
+    if(fail(ru))return;
+    S.user=ru.data.user;await load();
+  }
   else if(t.dataset.id){S.sel=t.dataset.id;render()}
   else if(id==='addD'){
     var r=await SB.from('debtors').insert({name:'Dłużnik '+(S.debtors.length+1),rate:0}).select().single();
