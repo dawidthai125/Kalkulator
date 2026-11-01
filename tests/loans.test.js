@@ -31,14 +31,16 @@ test('calc: spłata pokrywa najpierw odsetki, potem kapitał', () => {
   // 181 dni przy 10%: 1000 * 0.1/365 * 181 = 49,589...
   const c = L.calc({ rate: 10, entries: [loan('2026-01-01', 1000), pay('2026-07-01', 50)] }, '2026-07-01');
   near(c.int, 0);
-  near(c.cap, 1000 - (50 - 1000 * 0.1 / 365 * 181));
+  near(c.cap, 1000 - (50 - 1000 * 0.1 / 365 * 181), 0.005); // wynik w groszach: 999,59
+  assert.equal(c.cap, 999.59);
   near(c.paid, 50);
 });
 
 test('calc: spłata mniejsza niż odsetki zmniejsza tylko odsetki', () => {
   const c = L.calc({ rate: 10, entries: [loan('2026-01-01', 1000), pay('2026-07-01', 10)] }, '2026-07-01');
   near(c.cap, 1000);
-  near(c.int, 1000 * 0.1 / 365 * 181 - 10);
+  near(c.int, 1000 * 0.1 / 365 * 181 - 10, 0.005); // wynik w groszach: 39,59
+  assert.equal(c.int, 39.59);
 });
 
 test('calc: nadpłata daje ujemne owed i zerowy kapitał', () => {
@@ -131,5 +133,46 @@ test('parseNotes: linie bez kwoty trafiają do skip, a puste są ignorowane', ()
 test('parseNotes: kwota zero jest pomijana', () => {
   const r = L.parseNotes('01.10.2026 +0', false, 'X', '2026-11-01');
   assert.equal(r.rows.length, 0);
+  assert.equal(r.skip.length, 1);
+});
+
+// --- Poprawki błędów ---
+
+test('localDate: dzień według czasu lokalnego, nie UTC', () => {
+  process.env.TZ = 'Europe/Warsaw'; // 00:30 w Polsce to jeszcze poprzedni dzień w UTC
+  assert.equal(L.localDate(new Date(2026, 0, 1, 0, 30)), '2026-01-01');
+  assert.equal(L.localDate(new Date(2026, 11, 31, 23, 59)), '2026-12-31');
+  assert.equal(L.localDate(new Date(2026, 2, 5)), '2026-03-05');
+});
+
+test('calc: szum zmiennoprzecinkowy nie daje fałszywej nadpłaty ani długu', () => {
+  const c = L.calc({ rate: 0, entries: [loan('2026-01-01', 0.3), pay('2026-01-02', 0.1), pay('2026-01-03', 0.2)] }, '2026-02-01');
+  assert.equal(c.owed, 0);
+  assert.equal(c.cap, 0);
+  assert.ok(Object.is(c.owed, 0), 'owed nie może być -0');
+});
+
+test('calc: wyniki są zaokrąglone do groszy', () => {
+  const c = L.calc({ rate: 7, entries: [loan('2026-01-01', 1000)] }, '2026-04-01');
+  for (const k of ['cap', 'int', 'owed', 'lent', 'paid']) {
+    assert.equal(c[k], Math.round(c[k] * 100) / 100, k);
+  }
+});
+
+test('calc: suma pożyczek o groszowych kwotach jest dokładna', () => {
+  const c = L.calc({ rate: 0, entries: [loan('2026-01-01', 0.1), loan('2026-01-02', 0.2)] }, '2026-02-01');
+  assert.equal(c.lent, 0.3);
+  assert.equal(c.owed, 0.3);
+});
+
+test('parseNotes: nieistniejące daty trafiają do skip', () => {
+  const r = L.parseNotes('32.13.2026 +100\n2026-02-30 +5\n31.04.2026 +7\n01.10.2026 +1', false, 'X', '2026-11-01');
+  assert.deepEqual(r.rows.map(x => x.date), ['2026-10-01']);
+  assert.equal(r.skip.length, 3);
+});
+
+test('parseNotes: 29 lutego tylko w roku przestępnym', () => {
+  const r = L.parseNotes('29.02.2028 +1\n29.02.2026 +2', false, 'X', '2026-11-01');
+  assert.deepEqual(r.rows.map(x => x.date), ['2028-02-29']);
   assert.equal(r.skip.length, 1);
 });

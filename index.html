@@ -171,7 +171,7 @@ document.addEventListener('click',async function(e){
     if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „01.10.2026 +500”.</p>';return}
     box.innerHTML='<div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Dłużnik</th><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+
       IMP.map(function(x){return '<tr><td>'+esc(x.who)+'</td><td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+'</td><td class="n">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
-      (pr.skip.length?'<p class="sub" style="margin-top:10px">Pominięto '+pr.skip.length+' linii bez poprawnej kwoty.</p>':'')+
+      (pr.skip.length?'<p class="sub" style="margin-top:10px">Pominięto '+pr.skip.length+' linii bez poprawnej kwoty lub daty.</p>':'')+
       '<div class="foot"><button class="btn" id="doImp">Importuj '+IMP.length+' wpisów</button></div>';
   }
   else if(id==='doImp'&&IMP.length){
