@@ -1,14 +1,32 @@
 {
   "extraKnownMarketplaces": {
     "superpowers-marketplace": {
-      "source": { "source": "github", "repo": "obra/superpowers-marketplace" }
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
     },
     "ecc": {
-      "source": { "source": "github", "repo": "affaan-m/everything-claude-code" }
+      "source": {
+        "source": "github",
+        "repo": "affaan-m/everything-claude-code"
+      }
     }
   },
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
     "ecc@ecc": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
   }
 }
