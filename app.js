@@ -1,5 +1,6 @@
 var SB=supabase.createClient('https://ukpfrkjikqffojzpdywk.supabase.co','sb_publishable_9coMWsPQsvFtIwNRVEXPiQ_VVyFT8r_');
-var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false},IMP=[];
+// role: null (jeszcze nie wiadomo) | 'admin' (właściciel list) | 'debtor' (dłużnik z własnym loginem). Rolę zawsze ustala baza.
+var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false,role:null,me:null,pending:[],cred:null},IMP=[];
 var fmt=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 var today=Loans.today,esc=Loans.esc,calc=Loans.calc,parseNotes=Loans.parseNotes;
 function cur(){return S.debtors.find(function(d){return d.id===S.sel})}
@@ -7,9 +8,18 @@ function toast(m){document.querySelectorAll('.msg').forEach(function(x){x.textCo
 function fail(r){if(r&&r.error){toast('Błąd: '+r.error.message);return true}return false}
 
 async function load(){
-  var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*');
-  if(fail(a)||fail(b))return;
-  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
+  // Rolę ustala baza: konto dłużnika dostaje swój przegląd, właściciel dostaje null i widzi wszystkie swoje listy.
+  var ov=await SB.rpc('debtor_overview');
+  if(fail(ov))return;
+  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];render();return}
+  S.role='admin';S.me=null;
+  var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*'),
+      c=await SB.from('repayment_requests').select('*').eq('status','pending').order('created_at'),
+      g=await SB.from('debtor_access').select('debtor_id,login');
+  if(fail(a)||fail(b)||fail(c)||fail(g))return;
+  var acc={};g.data.forEach(function(x){acc[x.debtor_id]=x.login});
+  S.pending=c.data.map(function(r){return{id:r.id,debtor_id:r.debtor_id,amount:+r.amount,method:r.method,note:r.note||'',created_at:r.created_at}});
+  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,access:acc[d.id]||'',remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
   render();
 }
@@ -18,7 +28,7 @@ function render(){
   var t=document.getElementById('tabs'),p=document.getElementById('panel'),bar=document.getElementById('bar');
   if(!S.user){
     bar.innerHTML='';t.innerHTML='';
-    p.innerHTML='<div class="card"><h2>Zaloguj się</h2><div class="row"><label>E-mail<input id="em" type="email" autocomplete="email"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
+    p.innerHTML='<div class="card"><h2>Zaloguj się</h2><div class="row"><label>Login lub e-mail<input id="em" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
     '<div class="row" style="margin-top:12px"><button class="btn" id="login">Zaloguj</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
@@ -30,10 +40,16 @@ function render(){
     '<div class="foot"><button class="btn" id="setpw">Zapisz hasło</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
+  if(!S.role){
+    // baza jeszcze nie powiedziała, kim jest użytkownik: dłużnik nie może zobaczyć nawet chwilowo widoku właściciela
+    bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button>';
+    t.innerHTML='';p.innerHTML='<div class="card"><p class="empty">Ładowanie…</p><p class="msg" id="msg"></p></div>';return;
+  }
+  if(S.role==='debtor'){renderDebtor();return}
   bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
-  if(!d){p.innerHTML=pwCard()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
+  if(!d){p.innerHTML=pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
   var c=calc(d),rows=c.sorted.map(function(e){
     if(S.editId===e.id){
       return '<tr class="edit"><td colspan="4"><div class="editrow">'+
@@ -46,7 +62,7 @@ function render(){
     return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
-  p.innerHTML=pwCard()+dueHtml()+
+  p.innerHTML=pwCard()+reqHtml()+dueHtml()+
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
   '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
@@ -74,7 +90,7 @@ function render(){
   '<div class="row"><label class="wide">Wiadomość do dłużnika<textarea id="pdfmsg" maxlength="400" style="min-height:72px" placeholder="np. Cześć, wysyłam rozliczenie. Daj znać, kiedy możesz oddać."></textarea></label>'+
   '<label>Termin zapłaty<input id="pdfdue" type="date"></label><label>Numer konta lub BLIK<input id="pdfacct" maxlength="80" autocomplete="off"></label></div>'+
   '<div class="row" style="margin-top:10px"><button class="btn" id="pdfExp">Pobierz PDF</button></div></div>'+
-  '<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
+  accessCard(d)+'<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
   plan();
@@ -84,6 +100,68 @@ function pwCard(){
   if(!S.pwOpen)return '';
   return '<div class="card"><h2>Zmień hasło</h2><div class="row"><label>Nowe hasło (min. 8 znaków)<input id="pw1" type="password" autocomplete="new-password"></label><label>Powtórz hasło<input id="pw2" type="password" autocomplete="new-password"></label></div>'+
     '<div class="row" style="margin-top:12px"><button class="btn" id="chpw">Zapisz hasło</button><button class="btn ghost" id="pwCancel" style="color:var(--ink)">Anuluj</button></div><p class="msg"></p></div>';
+}
+// Baner właściciela: spłaty zgłoszone przez dłużników, czekające na akceptację.
+function reqHtml(){
+  if(!S.pending.length)return '';
+  return '<div class="card remind"><b>💰 Zgłoszone spłaty do akceptacji ('+S.pending.length+')</b>'+S.pending.map(function(r){
+    var d=S.debtors.find(function(x){return x.id===r.debtor_id});
+    return '<div class="req"><p class="sub" style="margin:8px 0 6px"><b>'+esc(d?d.name:'?')+'</b> · <b class="pos">'+fmt.format(r.amount)+'</b> · '+esc(Loans.methodLabel(r.method))+' · '+Loans.datePL(Loans.localDate(new Date(r.created_at)))+(r.note?'<br>'+esc(r.note):'')+'</p>'+
+      '<div class="row"><button class="btn" data-rapprove="'+esc(r.id)+'">Akceptuj</button><button class="btn ghost" data-rreject="'+esc(r.id)+'" style="color:var(--ink)">Odrzuć</button></div></div>';
+  }).join('')+'<p class="msg"></p></div>';
+}
+// Karta właściciela: konto logowania dłużnika (login i hasło tymczasowe).
+function accessCard(d){
+  var c=S.cred&&S.cred.debtor_id===d.id?S.cred:null;
+  var h='<div class="card"><h2>Dostęp dla dłużnika</h2><p class="sub">Dłużnik loguje się własnym loginem, widzi tylko swoją listę i może zgłosić spłatę (kwota, sposób płatności, adnotacja), którą Ty akceptujesz. Przy pierwszym logowaniu ustawi własne hasło.</p>';
+  if(c)h+='<div class="cred"><b>Dostęp gotowy.</b> Przekaż dłużnikowi:<br>Aplikacja: <b>'+esc(location.origin)+'</b><br>Login: <b>'+esc(c.login)+'</b><br>Hasło tymczasowe: <b>'+esc(c.password)+'</b><br><span class="sub">Hasło widać tylko teraz.</span><div class="row" style="margin-top:8px"><button class="btn ghost" id="acCopy" style="color:var(--ink)">Kopiuj dane logowania</button></div></div>';
+  if(d.access){
+    h+='<p class="sub" style="margin:0 0 8px">Login dłużnika: <b>'+esc(d.access)+'</b></p><div class="row"><label>Nowe hasło tymczasowe<input id="acpw" maxlength="72" autocomplete="off" autocapitalize="none"></label></div>'+
+      '<div class="row" style="margin-top:10px"><button class="btn" id="acReset">Ustaw nowe hasło</button><button class="btn ghost" id="acGen" style="color:var(--ink)">Wygeneruj hasło</button><button class="btn ghost" id="acDel">Usuń dostęp</button></div>';
+  }else{
+    h+='<div class="row"><label>Login dłużnika (małe litery, bez spacji)<input id="aclogin" maxlength="30" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="np. zosia"></label>'+
+      '<label>Hasło tymczasowe (min. 8 znaków)<input id="acpw" maxlength="72" autocomplete="off" autocapitalize="none"></label></div>'+
+      '<div class="row" style="margin-top:10px"><button class="btn" id="acCreate">Utwórz dostęp</button><button class="btn ghost" id="acGen" style="color:var(--ink)">Wygeneruj hasło</button></div>';
+  }
+  return h+'<p class="msg"></p></div>';
+}
+// Widok konta dłużnika: jego rozliczenie (tylko do odczytu), zgłaszanie spłat i historia zgłoszeń.
+function renderDebtor(){
+  var t=document.getElementById('tabs'),p=document.getElementById('panel'),bar=document.getElementById('bar'),m=S.me,
+      s=Loans.settlement({rate:0,entries:m.entries.map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}),
+      head=s.status==='debt'?'Do zapłaty dziś':s.status==='over'?'Nadpłata':'Rozliczone w całości';
+  bar.innerHTML='<span class="sub" style="margin:0">Login: <b>'+esc(m.login)+'</b></span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
+  t.innerHTML='';
+  var rows=m.entries.slice().reverse().map(function(e){
+    return '<tr><td>'+Loans.datePL(e.date)+'</td><td class="'+esc(e.type)+'">'+(e.type==='loan'?'Dług':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+esc(e.type)+'">'+fmt.format(+e.amount)+'</td></tr>';
+  }).join('');
+  var reqs=m.requests.map(function(r){
+    return '<li class="rq"><div><b>'+fmt.format(+r.amount)+'</b> · '+esc(Loans.methodLabel(r.method))+' · '+Loans.datePL(Loans.localDate(new Date(r.created_at)))+' <span class="st '+esc(r.status)+'">'+esc(Loans.statusLabel(r.status))+'</span></div>'+
+      (r.note?'<div class="note" style="max-width:none">'+esc(r.note)+'</div>':'')+(r.decision_note?'<div class="note" style="max-width:none">Powód odrzucenia: '+esc(r.decision_note)+'</div>':'')+'</li>';
+  }).join('');
+  p.innerHTML=pwCard()+
+    '<div class="card"><h2>Rozliczenie: '+esc(m.name)+'</h2><p class="sub">'+head+'</p><p class="total '+(s.status==='debt'?'neg':'pos')+'">'+fmt.format(s.due)+'</p>'+
+    '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(s.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(s.paid)+'</b></div></div></div>'+
+    '<div class="card"><h2>Zgłoś spłatę</h2><p class="sub">Wpisz kwotę, którą oddałeś, i wybierz sposób płatności. Spłata pojawi się na liście dopiero po akceptacji przez właściciela.</p>'+
+    '<div class="row"><label>Kwota (zł)<input id="dq" type="text" inputmode="decimal" placeholder="np. 250" autocomplete="off"></label>'+
+    '<label>Sposób płatności<select id="dm"><option value="blik">BLIK</option><option value="przelew">Przelew</option><option value="gotowka">Gotówka</option><option value="inne">Inna forma</option></select></label>'+
+    '<label class="wide">Adnotacja (opcjonalnie)<input id="dn" maxlength="200" autocomplete="off" placeholder="np. przelew za październik"></label></div>'+
+    '<div class="row" style="margin-top:10px"><button class="btn" id="dSend">Wyślij do akceptacji</button></div><p class="msg"></p></div>'+
+    '<div class="card"><h2>Twoje zgłoszenia</h2>'+(reqs?'<ul class="rqs">'+reqs+'</ul>':'<p class="empty">Nie zgłoszono jeszcze żadnej spłaty.</p>')+'</div>'+
+    '<div class="card"><h2>Historia długu</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów.</p>')+'</div>';
+}
+// Wywołanie funkcji serwerowej (zakładanie / reset / usuwanie konta dłużnika). Zwraca { ok, error }.
+async function fnCall(body){
+  var r=await SB.functions.invoke('manage-debtor-login',{body:body});
+  if(!r.error)return{ok:true,data:r.data};
+  var msg='Nie udało się. Spróbuj ponownie.';
+  try{var j=await r.error.context.json();if(j&&j.error)msg=j.error}catch(e){}
+  return{ok:false,error:msg};
+}
+function genPw(){
+  var a='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',b=new Uint32Array(10),o='';
+  crypto.getRandomValues(b);for(var i=0;i<b.length;i++)o+=a[b[i]%a.length];
+  return o;
 }
 function dueHtml(){
   var t=today(),a=S.debtors.filter(function(d){return d.remind_at&&d.remind_at<=t});
@@ -172,13 +250,52 @@ document.addEventListener('click',async function(e){
   var t=e.target,id=t.id,d=cur(),box;
   if(id==='login'){
     var em=document.getElementById('em').value.trim(),pw=document.getElementById('pw').value;
-    if(!em||pw.length<6){toast('Podaj e-mail i hasło (min. 6 znaków).');return}
-    var r=await SB.auth.signInWithPassword({email:em,password:pw});
+    if(!em||pw.length<6){toast('Podaj login lub e-mail i hasło (min. 6 znaków).');return}
+    var r=await SB.auth.signInWithPassword({email:Loans.loginToEmail(em),password:pw});
     if(fail(r))return;
   }
   else if(id==='logout'){await SB.auth.signOut()}
   else if(id==='pwToggle'){S.pwOpen=!S.pwOpen;render();var f1=document.getElementById('pw1');if(f1)f1.focus()}
   else if(id==='pwCancel'){S.pwOpen=false;render()}
+  else if(id==='dSend'&&S.role==='debtor'){
+    // dłużnik zgłasza spłatę: trafia do akceptacji właściciela, na liście pojawi się dopiero po niej
+    var dqv=parseFloat(document.getElementById('dq').value.replace(',','.')),dmv=document.getElementById('dm').value,dnv=document.getElementById('dn').value.trim();
+    if(!(dqv>0)){document.getElementById('dq').focus();toast('Wpisz kwotę większą od zera.');return}
+    t.disabled=true;
+    var sr=await SB.rpc('submit_repayment',{p_amount:Math.round(dqv*100)/100,p_method:dmv,p_note:dnv||null});
+    if(fail(sr)){t.disabled=false;return}
+    await load();toast('Zgłoszenie wysłane. Pojawi się na liście po akceptacji.');
+  }
+  else if(t.dataset.rapprove||t.dataset.rreject){
+    var rid=t.dataset.rapprove||t.dataset.rreject,apv=!!t.dataset.rapprove,why=null;
+    if(!apv){why=prompt('Powód odrzucenia (opcjonalnie, zobaczy go dłużnik):');if(why===null)return}
+    t.disabled=true;
+    var dr2=await SB.rpc('decide_repayment',{p_id:rid,p_approve:apv,p_reason:why});
+    if(fail(dr2)){t.disabled=false;return}
+    await load();toast(apv?'Zaakceptowano. Spłata jest już na liście dłużnika.':'Zgłoszenie odrzucone.');
+  }
+  else if(id==='acGen'){document.getElementById('acpw').value=genPw()}
+  else if((id==='acCreate'||id==='acReset')&&d){
+    var pwv=document.getElementById('acpw').value,lg=id==='acCreate'?document.getElementById('aclogin').value.trim().toLowerCase():d.access;
+    if(id==='acCreate'&&!Loans.validLogin(lg)){toast('Login: 3 do 30 znaków, małe litery bez polskich znaków, cyfry, kropka, myślnik lub podkreślenie.');return}
+    if(pwv.length<8){toast('Hasło tymczasowe musi mieć co najmniej 8 znaków.');return}
+    t.disabled=true;
+    var fr=await fnCall({action:id==='acCreate'?'create':'reset',debtor_id:d.id,login:lg,password:pwv});
+    t.disabled=false;
+    if(!fr.ok){toast(fr.error);return}
+    d.access=lg;S.cred={debtor_id:d.id,login:lg,password:pwv};render();
+    toast(id==='acCreate'?'Dostęp utworzony.':'Hasło tymczasowe ustawione.');
+  }
+  else if(id==='acDel'&&d){
+    if(!confirm('Usunąć dostęp dłużnika „'+d.name+'”? Jego lista i historia zostają, znika tylko możliwość logowania.'))return;
+    var xr=await fnCall({action:'delete',debtor_id:d.id});
+    if(!xr.ok){toast(xr.error);return}
+    d.access='';S.cred=null;render();toast('Dostęp usunięty.');
+  }
+  else if(id==='acCopy'&&S.cred){
+    var ctx='Dłużnik 2.0: '+location.origin+'\nLogin: '+S.cred.login+'\nHasło tymczasowe: '+S.cred.password+'\n(przy pierwszym logowaniu ustawisz własne hasło)';
+    try{await navigator.clipboard.writeText(ctx);toast('Skopiowano dane logowania.')}catch(err){toast('Nie udało się skopiować. Zaznacz dane i skopiuj ręcznie.')}
+  }
   else if(id==='setpw'||id==='chpw'){
     var p1=document.getElementById('pw1').value,p2=document.getElementById('pw2').value;
     if(p1.length<8){toast('Hasło musi mieć co najmniej 8 znaków.');return}
@@ -311,7 +428,7 @@ document.addEventListener('change',function(e){
   r.readAsText(f);e.target.value='';
 });
 document.addEventListener('input',function(e){
-  var t=e.target,isAm=t.id==='qa'||(t.classList&&t.classList.contains('sk-am'));
+  var t=e.target,isAm=t.id==='qa'||t.id==='dq'||(t.classList&&t.classList.contains('sk-am'));
   if(isAm){var clean=Loans.numOnly(t.value);if(clean!==t.value)t.value=clean}  // pole kwoty: tylko liczby
   if(t.id==='mo')plan();else if(t.classList&&t.classList.contains('sk-am'))refreshImpBtn()
 });
@@ -321,6 +438,7 @@ SB.auth.onAuthStateChange(function(ev,session){
   var next=session?session.user:null,kind=Loans.authTransition(S.user,next);
   S.user=next;
   if(kind==='same')return;
-  if(kind==='login')load();else{S.debtors=[];S.sel=null;render()}
+  if(kind==='login'){S.role=null;S.me=null;S.cred=null;render();load()}
+  else{S.debtors=[];S.sel=null;S.role=null;S.me=null;S.pending=[];S.cred=null;S.pwOpen=false;render()}
 });
 render();

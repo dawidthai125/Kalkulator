@@ -38,6 +38,45 @@ test('tekstowe pola kwoty (szybkie dopisanie, pominięte linie importu) przyjmuj
   assert.match(input, /sk-am/, 'filtr musi obejmować kwoty pominiętych linii importu');
 });
 
+test('dostęp dłużnika: logowanie loginem, rola z bazy, widok dłużnika i zgłoszenie spłaty', () => {
+  const app = read('app.js');
+  assert.match(app, /Loans\.loginToEmail\(/, 'logowanie loginem (bez e-maila)');
+  assert.match(app, /SB\.rpc\('debtor_overview'/, 'rola wynika z bazy, nie z danych użytkownika');
+  assert.match(app, /SB\.rpc\('submit_repayment'/);
+  assert.match(app, /function renderDebtor\(/);
+  assert.match(app, /id="dSend"/);
+  assert.match(app, /Wyślij do akceptacji/);
+});
+
+test('dostęp dłużnika: właściciel zakłada konto funkcją serwerową i akceptuje zgłoszenia', () => {
+  const app = read('app.js');
+  assert.match(app, /SB\.functions\.invoke\('manage-debtor-login'/);
+  for (const a of ['create', 'reset', 'delete']) assert.ok(app.includes("'" + a + "'"), 'akcja ' + a);
+  assert.match(app, /SB\.rpc\('decide_repayment'/);
+  assert.match(app, /data-rapprove=/); assert.match(app, /data-rreject=/);
+  assert.match(app, /id="acCreate"/);
+});
+
+test('dostęp dłużnika: dane z bazy (nazwy, opisy, powody) są escapowane w nowych widokach', () => {
+  const app = read('app.js');
+  const views = ['function renderDebtor', 'function reqHtml', 'function accessCard'].map(f => app.slice(app.indexOf(f), app.indexOf(f) + 4500)).join('\n');
+  for (const v of ['m.name', 'm.login', 'r.note', 'r.decision_note', 'e.note', 'd.access']) {
+    assert.ok(views.includes('esc(' + v), 'brak esc() dla ' + v);
+  }
+});
+
+test('dostęp dłużnika: ekran ładowania zamiast chwilowego widoku właściciela', () => {
+  const render = read('app.js').match(/function render\(\)[\s\S]*?\n\}/)[0];
+  assert.match(render, /if\(!S\.role\)/, 'bez roli pokazujemy "Ładowanie", żeby dłużnik nie zobaczył widoku właściciela');
+  assert.match(render, /S\.role==='debtor'/);
+});
+
+test('dostęp dłużnika: kwota zgłoszenia przyjmuje tylko liczby', () => {
+  const app = read('app.js');
+  const input = app.slice(app.indexOf("document.addEventListener('input'"));
+  assert.match(input, /id==='dq'/);
+});
+
 test('eksport PDF: przycisk, dokument z rozliczeniem i druk', () => {
   const app = read('app.js');
   assert.match(app, /id="pdfExp"/, 'brak przycisku eksportu PDF');

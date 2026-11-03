@@ -284,6 +284,27 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Dostęp dłużnika (login, sposoby płatności, statusy zgłoszeń) ---
+
+test('loginToEmail: login bez @ dostaje techniczny adres, e-mail zostaje (małe litery)', () => {
+  assert.equal(L.loginToEmail(' Zosia '), 'zosia@dluznik.invalid');
+  assert.equal(L.loginToEmail('e2e-zosia'), 'e2e-zosia@dluznik.invalid');
+  assert.equal(L.loginToEmail('Dawid.Thai@int.pl'), 'dawid.thai@int.pl');
+  assert.equal(L.loginToEmail('   '), '');
+});
+
+test('validLogin: tak samo jak w bazie (3-30 znaków, małe litery, cyfry, . _ -)', () => {
+  for (const ok of ['zosia', 'e2e-zosia', 'jan.k_1', 'a1b']) assert.equal(L.validLogin(ok), true, ok);
+  for (const bad of ['zo', 'Zosia', 'zosia!', '-zosia', 'zosię', 'jan kowalski', 'a'.repeat(31), '', 'a@b.pl']) assert.equal(L.validLogin(bad), false, bad);
+});
+
+test('methodLabel i statusLabel: polskie etykiety, nieznane wartości bez błędu', () => {
+  assert.deepEqual(['blik', 'przelew', 'gotowka', 'inne'].map(L.methodLabel), ['BLIK', 'Przelew', 'Gotówka', 'Inna forma']);
+  assert.equal(L.methodLabel('xyz'), 'Inna forma');
+  assert.deepEqual(['pending', 'approved', 'rejected'].map(L.statusLabel), ['Czeka na akceptację', 'Zaakceptowana', 'Odrzucona']);
+  assert.equal(L.statusLabel('xyz'), 'xyz');
+});
+
 // --- Rozliczenie dla dłużnika (eksport PDF) ---
 
 test('datePL: RRRR-MM-DD na DD.MM.RRRR, a puste lub błędne zostaje bez zmian', () => {
