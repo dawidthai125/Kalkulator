@@ -264,5 +264,11 @@
     return { pending: 'Czeka na akceptację', approved: 'Zaakceptowana', rejected: 'Odrzucona' }[s] || s;
   }
 
-  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
+  // Czy błąd to brak połączenia z internetem (komunikaty Chrome, Firefox i Safari), a nie błąd logiczny (hasło, uprawnienia).
+  function isNetworkError(err) {
+    var m = String(err && err.message ? err.message : (err || ''));
+    return /failed to fetch|networkerror|load failed|network request failed|internet connection appears to be offline|network connection was lost|fetch failed/i.test(m);
+  }
+
+  return { isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });

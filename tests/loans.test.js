@@ -284,6 +284,23 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Tryb offline ---
+
+test('isNetworkError: rozpoznaje brak połączenia w Chrome, Firefox i Safari', () => {
+  for (const m of ['TypeError: Failed to fetch', 'Failed to fetch', 'NetworkError when attempting to fetch resource.', 'Load failed', 'Network request failed', 'The Internet connection appears to be offline.']) {
+    assert.equal(L.isNetworkError({ message: m }), true, m);
+  }
+  assert.equal(L.isNetworkError('TypeError: Failed to fetch'), true, 'sam napis też');
+});
+
+test('isNetworkError: błędy logiczne (hasło, uprawnienia, walidacja) to nie brak sieci', () => {
+  for (const m of ['Invalid login credentials', 'Brak dostępu.', 'Kwota musi być większa od zera.', 'JWT expired', 'permission denied for table entries']) {
+    assert.equal(L.isNetworkError({ message: m }), false, m);
+  }
+  assert.equal(L.isNetworkError(null), false);
+  assert.equal(L.isNetworkError({}), false);
+});
+
 // --- Dostęp dłużnika (login, sposoby płatności, statusy zgłoszeń) ---
 
 test('loginToEmail: login bez @ dostaje techniczny adres, e-mail zostaje (małe litery)', () => {

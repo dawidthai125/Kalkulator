@@ -1,34 +1,71 @@
 var SB=supabase.createClient('https://ukpfrkjikqffojzpdywk.supabase.co','sb_publishable_9coMWsPQsvFtIwNRVEXPiQ_VVyFT8r_');
 // role: null (jeszcze nie wiadomo) | 'admin' (właściciel list) | 'debtor' (dłużnik z własnym loginem). Rolę zawsze ustala baza.
-var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false,role:null,me:null,pending:[],cred:null},IMP=[];
+var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false,role:null,me:null,pending:[],cred:null,offline:0},IMP=[];
 var fmt=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 var today=Loans.today,esc=Loans.esc,calc=Loans.calc,parseNotes=Loans.parseNotes;
 function cur(){return S.debtors.find(function(d){return d.id===S.sel})}
 function toast(m){document.querySelectorAll('.msg').forEach(function(x){x.textContent=m||''})}
-function fail(r){if(r&&r.error){toast('Błąd: '+r.error.message);return true}return false}
+function fail(r){
+  if(r&&r.error){toast(Loans.isNetworkError(r.error)?'Brak połączenia z internetem. Spróbuj ponownie, gdy wróci sieć.':'Błąd: '+r.error.message);return true}
+  return false;
+}
+
+// --- Tryb offline: ostatni wczytany stan (tylko do odczytu), zapisany na urządzeniu zalogowanego użytkownika ---
+var SNAP_KEY='dluznik-snapshot-v1',INST_KEY='dluznik-install-hidden',deferredInstall=null;
+function snapSave(){try{localStorage.setItem(SNAP_KEY,JSON.stringify({uid:S.user.id,at:Date.now(),role:S.role,debtors:S.debtors,me:S.me,pending:S.pending}))}catch(e){}}
+function snapLoad(){try{var s=JSON.parse(localStorage.getItem(SNAP_KEY)||'null');return s&&S.user&&s.uid===S.user.id?s:null}catch(e){return null}}
+function snapClear(){try{localStorage.removeItem(SNAP_KEY)}catch(e){}}
+// Brak sieci przy wczytywaniu: zamiast pustego ekranu z błędem pokazujemy ostatni zapisany stan.
+function offlineFallback(r){
+  if(!r||!r.error||!Loans.isNetworkError(r.error))return false;
+  var s=snapLoad();if(!s)return false;
+  S.role=s.role;S.debtors=s.debtors||[];S.me=s.me;S.pending=s.pending||[];S.offline=s.at;
+  if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
+  render();return true;
+}
+function offlineHtml(){
+  if(!S.offline)return '';
+  var d=new Date(S.offline),hm=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+  return '<div class="card remind"><b>Tryb offline</b><p class="sub" style="margin:4px 0 8px">Brak połączenia z internetem. Widzisz dane z '+Loans.datePL(Loans.localDate(d))+', '+hm+'. Zmiany będą możliwe po powrocie sieci.</p><div class="row"><button class="btn" id="retry">Spróbuj ponownie</button></div><p class="msg"></p></div>';
+}
+
+// --- Instalacja na telefonie: Android (przycisk) i iPhone (instrukcja) ---
+function isStandalone(){return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true}
+function isIOS(){return /iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)}
+function installHidden(){try{return localStorage.getItem(INST_KEY)==='1'}catch(e){return false}}
+function installHtml(){
+  if(isStandalone()||installHidden())return '';
+  if(deferredInstall)return '<div class="card" id="instCard"><h2>Zainstaluj aplikację</h2><p class="sub">Dodaj Dłużnik 2.0 do ekranu głównego, żeby otwierać ją jak zwykłą aplikację, także bez internetu.</p><div class="row"><button class="btn" id="instBtn">Zainstaluj aplikację</button><button class="btn ghost" id="instNo" style="color:var(--ink)">Nie teraz</button></div></div>';
+  if(isIOS())return '<div class="card" id="instCard"><h2>Zainstaluj aplikację</h2><p class="sub">Dotknij przycisku Udostępnij (kwadrat ze strzałką) w Safari, a potem „Dodaj do ekranu początkowego”. Aplikacja będzie otwierać się jak zwykła, także bez internetu.</p><div class="row"><button class="btn ghost" id="instNo" style="color:var(--ink)">Rozumiem, ukryj</button></div></div>';
+  return '';
+}
+function showInstall(){var p=document.getElementById('panel');if(p&&!document.getElementById('instCard'))p.insertAdjacentHTML('afterbegin',installHtml())}
 
 async function load(){
   // Rolę ustala baza: konto dłużnika dostaje swój przegląd, właściciel dostaje null i widzi wszystkie swoje listy.
   var ov=await SB.rpc('debtor_overview');
+  if(offlineFallback(ov))return;
   if(fail(ov))return;
-  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];render();return}
+  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];S.offline=0;snapSave();render();return}
   S.role='admin';S.me=null;
   var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*'),
       c=await SB.from('repayment_requests').select('*').eq('status','pending').order('created_at'),
       g=await SB.from('debtor_access').select('debtor_id,login');
+  var bad=[a,b,c,g].find(function(x){return x.error});
+  if(bad&&offlineFallback(bad))return;
   if(fail(a)||fail(b)||fail(c)||fail(g))return;
   var acc={};g.data.forEach(function(x){acc[x.debtor_id]=x.login});
   S.pending=c.data.map(function(r){return{id:r.id,debtor_id:r.debtor_id,amount:+r.amount,method:r.method,note:r.note||'',created_at:r.created_at}});
   S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,access:acc[d.id]||'',remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
-  render();
+  S.offline=0;snapSave();render();
 }
 
 function render(){
   var t=document.getElementById('tabs'),p=document.getElementById('panel'),bar=document.getElementById('bar');
   if(!S.user){
     bar.innerHTML='';t.innerHTML='';
-    p.innerHTML='<div class="card"><h2>Zaloguj się</h2><div class="row"><label>Login lub e-mail<input id="em" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
+    p.innerHTML=installHtml()+'<div class="card"><h2>Zaloguj się</h2><div class="row"><label>Login lub e-mail<input id="em" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username"></label><label>Hasło (min. 6 znaków)<input id="pw" type="password" autocomplete="current-password"></label></div>'+
     '<div class="row" style="margin-top:12px"><button class="btn" id="login">Zaloguj</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
@@ -49,7 +86,7 @@ function render(){
   bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
-  if(!d){p.innerHTML=pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
+  if(!d){p.innerHTML=offlineHtml()+installHtml()+pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
   var c=calc(d),rows=c.sorted.map(function(e){
     if(S.editId===e.id){
       return '<tr class="edit"><td colspan="4"><div class="editrow">'+
@@ -62,7 +99,7 @@ function render(){
     return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
-  p.innerHTML=pwCard()+reqHtml()+dueHtml()+
+  p.innerHTML=offlineHtml()+installHtml()+pwCard()+reqHtml()+dueHtml()+
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
   '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
@@ -139,7 +176,7 @@ function renderDebtor(){
     return '<li class="rq"><div><b>'+fmt.format(+r.amount)+'</b> · '+esc(Loans.methodLabel(r.method))+' · '+Loans.datePL(Loans.localDate(new Date(r.created_at)))+' <span class="st '+esc(r.status)+'">'+esc(Loans.statusLabel(r.status))+'</span></div>'+
       (r.note?'<div class="note" style="max-width:none">'+esc(r.note)+'</div>':'')+(r.decision_note?'<div class="note" style="max-width:none">Powód odrzucenia: '+esc(r.decision_note)+'</div>':'')+'</li>';
   }).join('');
-  p.innerHTML=pwCard()+
+  p.innerHTML=offlineHtml()+installHtml()+pwCard()+
     '<div class="card"><h2>Rozliczenie: '+esc(m.name)+'</h2><p class="sub">'+head+'</p><p class="total '+(s.status==='debt'?'neg':'pos')+'">'+fmt.format(s.due)+'</p>'+
     '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(s.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(s.paid)+'</b></div></div></div>'+
     '<div class="card"><h2>Zgłoś spłatę</h2><p class="sub">Wpisz kwotę, którą oddałeś, i wybierz sposób płatności. Spłata pojawi się na liście dopiero po akceptacji przez właściciela.</p>'+
@@ -257,6 +294,12 @@ document.addEventListener('click',async function(e){
   else if(id==='logout'){await SB.auth.signOut()}
   else if(id==='pwToggle'){S.pwOpen=!S.pwOpen;render();var f1=document.getElementById('pw1');if(f1)f1.focus()}
   else if(id==='pwCancel'){S.pwOpen=false;render()}
+  else if(id==='instBtn'&&deferredInstall){
+    deferredInstall.prompt();try{await deferredInstall.userChoice}catch(err){}
+    deferredInstall=null;var ic=document.getElementById('instCard');if(ic)ic.remove();
+  }
+  else if(id==='instNo'){try{localStorage.setItem(INST_KEY,'1')}catch(err){}var ic2=document.getElementById('instCard');if(ic2)ic2.remove()}
+  else if(id==='retry'){t.disabled=true;await load();if(S.offline){t.disabled=false;toast('Nadal brak połączenia z internetem.')}}
   else if(id==='dSend'&&S.role==='debtor'){
     // dłużnik zgłasza spłatę: trafia do akceptacji właściciela, na liście pojawi się dopiero po niej
     var dqv=parseFloat(document.getElementById('dq').value.replace(',','.')),dmv=document.getElementById('dm').value,dnv=document.getElementById('dn').value.trim();
@@ -439,6 +482,12 @@ SB.auth.onAuthStateChange(function(ev,session){
   S.user=next;
   if(kind==='same')return;
   if(kind==='login'){S.role=null;S.me=null;S.cred=null;render();load()}
-  else{S.debtors=[];S.sel=null;S.role=null;S.me=null;S.pending=[];S.cred=null;S.pwOpen=false;render()}
+  else{S.debtors=[];S.sel=null;S.role=null;S.me=null;S.pending=[];S.cred=null;S.pwOpen=false;S.offline=0;snapClear();render()}
 });
+// Po powrocie sieci tryb offline odświeża się sam.
+window.addEventListener('online',function(){if(S.user&&S.offline)load()});
+// Android/Chrome: własny przycisk instalacji zamiast ukrytej pozycji w menu przeglądarki.
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferredInstall=e;showInstall()});
+window.addEventListener('appinstalled',function(){deferredInstall=null;var c=document.getElementById('instCard');if(c)c.remove()});
+if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}
 render();

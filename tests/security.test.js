@@ -41,7 +41,8 @@ test('vercel.json ustawia CSP i podstawowe nagłówki bezpieczeństwa', () => {
 test('CSP pozwala łączyć się tylko z projektem Supabase użytym w app.js', () => {
   const url = read('app.js').match(/createClient\('(https:\/\/[^']+)'/)[1];
   const h = JSON.parse(read('vercel.json')).headers[0].headers.find(x => x.key === 'Content-Security-Policy');
-  assert.match(h.value, new RegExp("connect-src " + url.replace(/[.]/g, '\\.') + '(;|$)'));
+  // 'self' jest potrzebne service workerowi (jego pobieranie plików aplikacji podlega connect-src); poza tym wyłącznie Supabase
+  assert.match(h.value, new RegExp("connect-src 'self' " + url.replace(/[.]/g, '\\.') + '(;|$)'));
 });
 
 test('w kodzie strony nie ma jawnych haseł ani sekretów (klucz publishable jest dozwolony)', () => {
