@@ -284,6 +284,16 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Powiadomienia push ---
+
+test('urlBase64ToUint8Array: klucz base64url (bez dopełnienia) na bajty, jak wymaga PushManager.subscribe', () => {
+  assert.deepEqual([...L.urlBase64ToUint8Array('AQID')], [1, 2, 3]);
+  assert.deepEqual([...L.urlBase64ToUint8Array('_-8')], [255, 239], 'znaki - i _ oraz brak dopełnienia');
+  const key = 'BJJ7Y9ZK7JOzncnT_9TEijdetZ9B0q0fV1vIsa4rzaUtbHsEyqyCPYc7BtHAKi_h91nFvV7WVQqVArXVpC2ybvs';
+  const b = L.urlBase64ToUint8Array(key);
+  assert.ok(b instanceof Uint8Array); assert.equal(b.length, 65, 'klucz publiczny P-256 ma 65 bajtów'); assert.equal(b[0], 4, 'nieskompresowany punkt');
+});
+
 // --- Tryb offline ---
 
 test('isNetworkError: rozpoznaje brak połączenia w Chrome, Firefox i Safari', () => {

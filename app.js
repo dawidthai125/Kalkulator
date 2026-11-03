@@ -1,6 +1,6 @@
 var SB=supabase.createClient('https://ukpfrkjikqffojzpdywk.supabase.co','sb_publishable_9coMWsPQsvFtIwNRVEXPiQ_VVyFT8r_');
 // role: null (jeszcze nie wiadomo) | 'admin' (właściciel list) | 'debtor' (dłużnik z własnym loginem). Rolę zawsze ustala baza.
-var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false,role:null,me:null,pending:[],cred:null,offline:0},IMP=[];
+var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false,role:null,me:null,pending:[],cred:null,offline:0,pushState:'unknown'},IMP=[];
 var fmt=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 var today=Loans.today,esc=Loans.esc,calc=Loans.calc,parseNotes=Loans.parseNotes;
 function cur(){return S.debtors.find(function(d){return d.id===S.sel})}
@@ -41,12 +41,77 @@ function installHtml(){
 }
 function showInstall(){var p=document.getElementById('panel');if(p&&!document.getElementById('instCard'))p.insertAdjacentHTML('afterbegin',installHtml())}
 
+// --- Powiadomienia push (Web Push): właściciel dostaje je po zgłoszeniu spłaty, dłużnik po decyzji ---
+var pushKeyCache=null;
+function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window}
+async function pushStatus(){
+  if(!pushSupported())return (isIOS()&&!isStandalone())?'needs-install':'unsupported';
+  if(Notification.permission==='denied')return 'denied';
+  try{var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();return sub&&Notification.permission==='granted'?'on':'off'}catch(e){return 'off'}
+}
+function pushCard(){
+  var s=S.pushState,h='<div class="card" id="pushCard"><h2>Powiadomienia</h2>';
+  if(s==='unknown'||s==='unsupported')return '';
+  var what=S.role==='debtor'?'Dostaniesz powiadomienie, gdy właściciel zaakceptuje lub odrzuci Twoją spłatę.':'Dostaniesz powiadomienie, gdy dłużnik zgłosi spłatę do akceptacji.';
+  if(s==='needs-install')return h+'<p class="sub">Na iPhone powiadomienia działają po dodaniu aplikacji do ekranu głównego (Udostępnij → Dodaj do ekranu początkowego). Otwórz ją potem z ikony i włącz powiadomienia tutaj.</p></div>';
+  if(s==='denied')return h+'<p class="sub">Powiadomienia są zablokowane w ustawieniach przeglądarki lub telefonu dla tej aplikacji. Odblokuj je tam, a potem wróć tutaj.</p></div>';
+  if(s==='busy')return h+'<p class="sub">Włączanie…</p></div>';
+  if(s==='on')return h+'<p class="sub">Włączone na tym urządzeniu. '+what+'</p><div class="row"><button class="btn ghost" id="pushOff" style="color:var(--ink)">Wyłącz powiadomienia</button></div><p class="msg"></p></div>';
+  return h+'<p class="sub">'+what+'</p><div class="row"><button class="btn" id="pushOn">Włącz powiadomienia</button></div><p class="msg"></p></div>';
+}
+// Odświeża kartę w miejscu (bez przerysowania całego widoku, żeby nie zgubić wpisywanych pól).
+function updatePushCard(){
+  var p=document.getElementById('panel');if(!p||!S.role)return;
+  var h=pushCard(),el=document.getElementById('pushCard');
+  if(el){if(h)el.outerHTML=h;else el.remove()}
+  else if(h){var ic=document.getElementById('instCard');if(ic)ic.insertAdjacentHTML('afterend',h);else p.insertAdjacentHTML('afterbegin',h)}
+}
+async function pushSaveCurrent(){
+  try{
+    var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(!sub)return null;
+    var j=sub.toJSON();
+    return await SB.rpc('save_push_subscription',{p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth,p_ua:navigator.userAgent.slice(0,200)});
+  }catch(e){return null}
+}
+async function refreshPush(){S.pushState=await pushStatus();if(S.pushState==='on')pushSaveCurrent();updatePushCard()}
+async function pushKey(){
+  if(pushKeyCache)return pushKeyCache;
+  var r=await SB.functions.invoke('send-push',{body:{action:'key'}});
+  if(r.error||!r.data||!r.data.publicKey)throw new Error('brak klucza');
+  return pushKeyCache=r.data.publicKey;
+}
+async function pushEnable(){
+  S.pushState='busy';updatePushCard();
+  try{
+    var perm=await Notification.requestPermission(); // musi być pierwsze: wymaga bezpośredniego gestu użytkownika (iOS)
+    if(perm!=='granted'){S.pushState=perm==='denied'?'denied':'off';updatePushCard();return}
+    var key=await pushKey(),reg=await navigator.serviceWorker.ready;
+    var sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Loans.urlBase64ToUint8Array(key)});
+    var j=sub.toJSON(),r=await SB.rpc('save_push_subscription',{p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth,p_ua:navigator.userAgent.slice(0,200)});
+    if(r.error){try{await sub.unsubscribe()}catch(e2){}throw r.error}
+    S.pushState='on';
+  }catch(e){S.pushState='off';updatePushCard();toast('Nie udało się włączyć powiadomień. Spróbuj ponownie.');return}
+  updatePushCard();toast('Powiadomienia włączone.');
+}
+// Usuwa z serwera subskrypcję tego urządzenia (przeglądarka zachowuje własną, więc po ponownym logowaniu wraca sama).
+async function pushCleanup(){
+  if(!pushSupported())return;
+  try{var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub)await SB.from('push_subscriptions').delete().eq('endpoint',sub.endpoint)}catch(e){}
+}
+async function pushDisable(){
+  try{var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();
+    if(sub){await SB.from('push_subscriptions').delete().eq('endpoint',sub.endpoint);await sub.unsubscribe()}}catch(e){}
+  S.pushState='off';updatePushCard();toast('Powiadomienia wyłączone.');
+}
+// Prosi funkcję serwerową o wysłanie powiadomienia; ona sama sprawdza uprawnienia i wysyła najwyżej raz.
+function notifyPush(type,id){try{SB.functions.invoke('send-push',{body:{action:'notify',type:type,request_id:id}}).catch(function(){})}catch(e){}}
+
 async function load(){
   // Rolę ustala baza: konto dłużnika dostaje swój przegląd, właściciel dostaje null i widzi wszystkie swoje listy.
   var ov=await SB.rpc('debtor_overview');
   if(offlineFallback(ov))return;
   if(fail(ov))return;
-  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];S.offline=0;snapSave();render();return}
+  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];S.offline=0;snapSave();render();refreshPush();return}
   S.role='admin';S.me=null;
   var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*'),
       c=await SB.from('repayment_requests').select('*').eq('status','pending').order('created_at'),
@@ -58,7 +123,7 @@ async function load(){
   S.pending=c.data.map(function(r){return{id:r.id,debtor_id:r.debtor_id,amount:+r.amount,method:r.method,note:r.note||'',created_at:r.created_at}});
   S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,access:acc[d.id]||'',remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
-  S.offline=0;snapSave();render();
+  S.offline=0;snapSave();render();refreshPush();
 }
 
 function render(){
@@ -86,7 +151,7 @@ function render(){
   bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
-  if(!d){p.innerHTML=offlineHtml()+installHtml()+pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
+  if(!d){p.innerHTML=offlineHtml()+installHtml()+pushCard()+pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
   var c=calc(d),rows=c.sorted.map(function(e){
     if(S.editId===e.id){
       return '<tr class="edit"><td colspan="4"><div class="editrow">'+
@@ -99,7 +164,7 @@ function render(){
     return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
-  p.innerHTML=offlineHtml()+installHtml()+pwCard()+reqHtml()+dueHtml()+
+  p.innerHTML=offlineHtml()+installHtml()+pushCard()+pwCard()+reqHtml()+dueHtml()+
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
   '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
@@ -176,7 +241,7 @@ function renderDebtor(){
     return '<li class="rq"><div><b>'+fmt.format(+r.amount)+'</b> · '+esc(Loans.methodLabel(r.method))+' · '+Loans.datePL(Loans.localDate(new Date(r.created_at)))+' <span class="st '+esc(r.status)+'">'+esc(Loans.statusLabel(r.status))+'</span></div>'+
       (r.note?'<div class="note" style="max-width:none">'+esc(r.note)+'</div>':'')+(r.decision_note?'<div class="note" style="max-width:none">Powód odrzucenia: '+esc(r.decision_note)+'</div>':'')+'</li>';
   }).join('');
-  p.innerHTML=offlineHtml()+installHtml()+pwCard()+
+  p.innerHTML=offlineHtml()+installHtml()+pushCard()+pwCard()+
     '<div class="card"><h2>Rozliczenie: '+esc(m.name)+'</h2><p class="sub">'+head+'</p><p class="total '+(s.status==='debt'?'neg':'pos')+'">'+fmt.format(s.due)+'</p>'+
     '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(s.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(s.paid)+'</b></div></div></div>'+
     '<div class="card"><h2>Zgłoś spłatę</h2><p class="sub">Wpisz kwotę, którą oddałeś, i wybierz sposób płatności. Spłata pojawi się na liście dopiero po akceptacji przez właściciela.</p>'+
@@ -291,7 +356,9 @@ document.addEventListener('click',async function(e){
     var r=await SB.auth.signInWithPassword({email:Loans.loginToEmail(em),password:pw});
     if(fail(r))return;
   }
-  else if(id==='logout'){await SB.auth.signOut()}
+  else if(id==='logout'){await pushCleanup();await SB.auth.signOut()}
+  else if(id==='pushOn'){await pushEnable()}
+  else if(id==='pushOff'){await pushDisable()}
   else if(id==='pwToggle'){S.pwOpen=!S.pwOpen;render();var f1=document.getElementById('pw1');if(f1)f1.focus()}
   else if(id==='pwCancel'){S.pwOpen=false;render()}
   else if(id==='instBtn'&&deferredInstall){
@@ -307,6 +374,7 @@ document.addEventListener('click',async function(e){
     t.disabled=true;
     var sr=await SB.rpc('submit_repayment',{p_amount:Math.round(dqv*100)/100,p_method:dmv,p_note:dnv||null});
     if(fail(sr)){t.disabled=false;return}
+    notifyPush('request',sr.data);
     await load();toast('Zgłoszenie wysłane. Pojawi się na liście po akceptacji.');
   }
   else if(t.dataset.rapprove||t.dataset.rreject){
@@ -315,6 +383,7 @@ document.addEventListener('click',async function(e){
     t.disabled=true;
     var dr2=await SB.rpc('decide_repayment',{p_id:rid,p_approve:apv,p_reason:why});
     if(fail(dr2)){t.disabled=false;return}
+    notifyPush('decision',rid);
     await load();toast(apv?'Zaakceptowano. Spłata jest już na liście dłużnika.':'Zgłoszenie odrzucone.');
   }
   else if(id==='acGen'){document.getElementById('acpw').value=genPw()}
@@ -482,7 +551,7 @@ SB.auth.onAuthStateChange(function(ev,session){
   S.user=next;
   if(kind==='same')return;
   if(kind==='login'){S.role=null;S.me=null;S.cred=null;render();load()}
-  else{S.debtors=[];S.sel=null;S.role=null;S.me=null;S.pending=[];S.cred=null;S.pwOpen=false;S.offline=0;snapClear();render()}
+  else{S.debtors=[];S.sel=null;S.role=null;S.me=null;S.pending=[];S.cred=null;S.pwOpen=false;S.offline=0;S.pushState='unknown';snapClear();render()}
 });
 // Po powrocie sieci tryb offline odświeża się sam.
 window.addEventListener('online',function(){if(S.user&&S.offline)load()});
