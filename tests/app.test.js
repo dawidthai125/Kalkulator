@@ -20,6 +20,16 @@ test('aplikacja nie liczy ani nie pokazuje oprocentowania (pożyczki bez procent
   assert.ok(!/id="rt"/.test(ui), 'pole #rt nie powinno istnieć');
 });
 
+test('zalogowany użytkownik może zmienić hasło (przycisk w pasku i karta, także bez dłużników)', () => {
+  const app = read('app.js');
+  assert.match(app, /id="pwToggle"/, 'brak przycisku otwierającego zmianę hasła');
+  assert.match(app, /id="chpw"/, 'brak przycisku zapisu nowego hasła');
+  const noDebtor = app.match(/if\(!d\)\{p\.innerHTML=[^\n]*\}/)[0];
+  assert.match(noDebtor, /pwCard\(\)/, 'karta hasła musi być też w widoku bez dłużników');
+  const click = app.slice(app.indexOf("id==='setpw'"));
+  assert.match(click, /length<8/, 'minimum 8 znaków');
+});
+
 test('stara stawka zapisana w bazie jest ignorowana przy wczytywaniu dłużników', () => {
   const load = read('app.js').match(/async function load\(\)[\s\S]*?\n\}/)[0];
   assert.match(load, /rate:0/);
