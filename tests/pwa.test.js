@@ -109,6 +109,16 @@ test('push: treść powiadomienia jest ogólna (bez imienia i kwoty na ekranie b
   assert.match(fn, /Otwórz aplikację, aby zobaczyć szczegóły/);
 });
 
+test('historia i błędy: migracja loguje zmiany triggerem, ukrywa dziennik przed zapisem i limituje zgłoszenia błędów', () => {
+  const sql = read('supabase/migrations/20261103_audit_and_errors.sql');
+  assert.match(sql, /create trigger entries_log after insert or update or delete on public\.entries/);
+  assert.match(sql, /revoke insert, update, delete on public\.entry_log from authenticated/);
+  assert.match(sql, /using \(owner_id = \(select auth\.uid\(\)\)\)/, 'właściciel czyta tylko własny dziennik');
+  assert.match(sql, /not exists \(select 1 from auth\.users where id = owner\)/, 'kasowanie konta właściciela nie może się wywalić na dzienniku');
+  assert.match(sql, /revoke all on public\.client_errors from anon, authenticated/);
+  assert.match(sql, />= 30/, 'limit zgłoszeń błędów na godzinę');
+});
+
 test('push: migracja ukrywa klucze VAPID i nie pozwala zapisywać subskrypcji bezpośrednio', () => {
   const sql = read('supabase/migrations/20261103_push_notifications.sql');
   assert.match(sql, /alter table public\.push_config enable row level security/);

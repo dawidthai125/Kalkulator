@@ -123,6 +123,25 @@ test('widok dłużnika ma informację o prywatności', () => {
   assert.match(debtorView, /Prywatność/); assert.match(debtorView, /Frankfurt/);
 });
 
+test('historia zmian: właściciel wczytuje dziennik zmian wpisów dłużnika na żądanie, dane są escapowane', () => {
+  const app = read('app.js');
+  assert.match(app, /id="logShow"/); assert.match(app, /id="logBox"/);
+  const h = app.slice(app.indexOf("id==='logShow'"), app.indexOf("id==='logShow'") + 1200);
+  assert.match(h, /from\('entry_log'\)/); assert.match(h, /\.eq\('debtor_id',d\.id\)/); assert.match(h, /\.limit\(50\)/);
+  assert.match(h, /Loans\.describeLog\(/); assert.match(h, /esc\(ds\.text\)/);
+});
+
+test('monitoring błędów: nieobsłużone błędy trafiają do bazy z limitem i bez szumu sieciowego', () => {
+  const app = read('app.js');
+  const rep = app.match(/function reportError\([\s\S]*?\n\}/)[0];
+  assert.match(rep, /errSent>=5/, 'najwyżej 5 zgłoszeń na wczytanie strony');
+  assert.match(rep, /errSeen\[msg\]/, 'ten sam błąd nie jest zgłaszany ponownie');
+  assert.match(rep, /isNetworkError/, 'brak internetu to nie błąd aplikacji');
+  assert.match(rep, /S\.user/, 'tylko zalogowani (baza i tak odrzuca anonimowych)');
+  assert.match(rep, /log_client_error/);
+  assert.match(app, /addEventListener\('error'/); assert.match(app, /addEventListener\('unhandledrejection'/);
+});
+
 test('eksport PDF: przycisk, dokument z rozliczeniem i druk', () => {
   const app = read('app.js');
   assert.match(app, /id="pdfExp"/, 'brak przycisku eksportu PDF');

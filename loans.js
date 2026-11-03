@@ -298,5 +298,25 @@
     return !o.hidden && !!o.loggedIn && !o.busy && !o.typing && (o.now - o.last) >= o.minMs;
   }
 
-  return { markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
+  // Opis wiersza dziennika zmian (tabela entry_log): { label, text } po polsku.
+  function describeLog(row) {
+    function money(v) { return (Math.round(Number(v) * 100) / 100).toFixed(2).replace('.', ','); }
+    function kind(t) { return t === 'loan' ? 'pożyczka' : t === 'pay' ? 'spłata' : String(t || ''); }
+    function quoted(s) { return s ? '„' + s + '”' : '—'; }
+    function line(e) { return e ? kind(e.type) + ' ' + money(e.amount) + ' zł z ' + datePL(e.date) + (e.note ? ' (' + e.note + ')' : '') : ''; }
+    if (row.action === 'insert') return { label: 'Dodano', text: line(row.new_data) };
+    if (row.action === 'delete') return { label: 'Usunięto', text: line(row.old_data) };
+    if (row.action === 'update') {
+      var o = row.old_data, n = row.new_data, parts = [];
+      if (!o || !n) return { label: 'Zmieniono', text: 'bez zmian w polach wpisu' };
+      if (o.type !== n.type) parts.push('rodzaj ' + kind(o.type) + ' → ' + kind(n.type));
+      if (o.date !== n.date) parts.push('data ' + datePL(o.date) + ' → ' + datePL(n.date));
+      if (Number(o.amount) !== Number(n.amount)) parts.push('kwota ' + money(o.amount) + ' → ' + money(n.amount) + ' zł');
+      if ((o.note || '') !== (n.note || '')) parts.push('opis ' + quoted(o.note) + ' → ' + quoted(n.note));
+      return { label: 'Zmieniono', text: parts.join('; ') || 'bez zmian w polach wpisu' };
+    }
+    return { label: String(row.action), text: '' };
+  }
+
+  return { describeLog: describeLog, markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });
