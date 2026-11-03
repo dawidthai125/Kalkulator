@@ -226,5 +226,25 @@
     return m ? m[0] : '';
   }
 
-  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly };
+  // 'RRRR-MM-DD' -> 'DD.MM.RRRR'; coś innego zostaje bez zmian.
+  function datePL(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+    return m ? m[3] + '.' + m[2] + '.' + m[1] : (iso || '');
+  }
+
+  // Dane do dokumentu rozliczenia dla dłużnika: długi i spłaty osobno (po dacie), sumy i kwota końcowa.
+  // due = kwota bezwzględna; status: 'debt' (do spłaty), 'settled' (rozliczone), 'over' (nadpłata).
+  function settlement(d, asOf) {
+    var c = calc(d, asOf);
+    function rows(type) {
+      return c.sorted.filter(function (e) { return e.type === type; })
+        .map(function (e) { return { date: e.date, note: e.note || '', amount: e.amount }; });
+    }
+    return {
+      loans: rows('loan'), pays: rows('pay'), lent: c.lent, paid: c.paid, due: money(Math.abs(c.owed)),
+      status: c.owed > 0 ? 'debt' : c.owed < 0 ? 'over' : 'settled'
+    };
+  }
+
+  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement };
 });
