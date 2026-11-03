@@ -179,7 +179,7 @@ function render(){
   bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
-  if(!d){p.innerHTML=offlineHtml()+installHtml()+pushCard()+pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
+  if(!d){p.innerHTML=offlineHtml()+installHtml()+pushCard()+pwCard()+reqHtml()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>'+backupCard();return}
   var c=calc(d),rows=c.sorted.map(function(e){
     if(S.editId===e.id){
       return '<tr class="edit"><td colspan="4"><div class="editrow">'+
@@ -221,10 +221,33 @@ function render(){
   '<div class="row"><label class="wide">Wiadomość do dłużnika<textarea id="pdfmsg" maxlength="400" style="min-height:72px" placeholder="np. Cześć, wysyłam rozliczenie. Daj znać, kiedy możesz oddać."></textarea></label>'+
   '<label>Termin zapłaty<input id="pdfdue" type="date"></label><label>Numer konta lub BLIK<input id="pdfacct" maxlength="80" autocomplete="off"></label></div>'+
   '<div class="row" style="margin-top:10px"><button class="btn" id="pdfExp">Pobierz PDF</button></div></div>'+
-  accessCard(d)+'<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
+  accessCard(d)+backupCard()+'<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
   plan();
+}
+// --- Kopia zapasowa: pobranie JSON/CSV i bezpieczne wczytanie (tylko dodawanie, nic nie nadpisuje ani nie usuwa) ---
+var BKPLAN=null;
+function backupCard(){
+  var last='';try{last=localStorage.getItem('dluznik-last-backup')||''}catch(e){}
+  return '<div class="card"><h2>Kopia zapasowa</h2><p class="sub">Zapisz wszystkich dłużników i wpisy do pliku. JSON służy do przywrócenia danych, CSV otwiera się w Excelu. Kopia nie zawiera haseł, kont dłużników ani próśb o spłatę. Plik zawiera dane osobowe, trzymaj go w bezpiecznym miejscu.'+'<span id="bkLast">'+(last?' Ostatnia kopia: '+esc(last)+'.':' Jeszcze nie robiono kopii na tym urządzeniu.')+'</span></p>'+
+  '<div class="row"><button class="btn" id="bkJson">Pobierz kopię (JSON)</button><button class="btn ghost" id="bkCsv">Pobierz dla Excela (CSV)</button></div>'+
+  '<label class="filepick" style="margin-top:12px">Przywróć z pliku kopii (.json), dodaje brakujące wpisy i niczego nie usuwa<input id="bkfile" type="file" accept=".json,application/json"></label><div id="bkOut" class="imp"></div></div>';
+}
+async function saveFile(name,text,mime){
+  var file=null;
+  try{file=new File([text],name,{type:mime})}catch(e){}
+  if(file&&navigator.canShare&&/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent)&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file],title:name});return true}catch(err){if(err&&err.name==='AbortError')return false}
+  }
+  var a=document.createElement('a'),u=URL.createObjectURL(new Blob([text],{type:mime}));
+  a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);return true;
+}
+async function doBackup(kind){
+  var b=Loans.buildBackup(S.debtors,new Date()),stamp=today(),ok;
+  if(kind==='csv')ok=await saveFile('dluznik-kopia-'+stamp+'.csv',Loans.backupCsv(b),'text/csv;charset=utf-8');
+  else ok=await saveFile('dluznik-kopia-'+stamp+'.json',JSON.stringify(b,null,2),'application/json');
+  if(ok){try{localStorage.setItem('dluznik-last-backup',Loans.datePL(stamp))}catch(e){}var bl=document.getElementById('bkLast');if(bl)bl.textContent=' Ostatnia kopia: '+Loans.datePL(stamp)+'.';toast('Zapisano kopię: '+b.debtors.length+' dłużników.')}
 }
 // Karta zmiany hasła (otwierana przyciskiem "Hasło" w pasku), dostępna dla każdego zalogowanego konta.
 function pwCard(){
@@ -570,6 +593,27 @@ document.addEventListener('click',async function(e){
     var r2=await SB.from('entries').insert(rows);if(fail(r2)){t.disabled=false;t.textContent='Importuj '+ALL.length+' wpisów';return}
     IMP=[];await load();
   }
+  else if(id==='bkJson'||id==='bkCsv'){await doBackup(id==='bkCsv'?'csv':'json')}
+  else if(id==='bkRestore'&&BKPLAN){
+    var P=BKPLAN;
+    if(!confirm('Dodać '+P.newEntries+' wpisów i '+P.newDebtors+' nowych dłużników? Istniejące dane zostaną nietknięte.'))return;
+    t.disabled=true;t.textContent='Wczytuję…';
+    var ids={};S.debtors.forEach(function(z){ids[z.name.toLowerCase()]=z.id});
+    for(var i=0;i<P.items.length;i++){
+      var it=P.items[i],did=ids[it.name.toLowerCase()];
+      if(!did){
+        var r=await SB.from('debtors').insert({name:it.name,rate:0,remind_at:it.remind_at||null,remind_note:it.remind_note||null}).select().single();
+        if(fail(r)){t.disabled=false;t.textContent='Spróbuj ponownie';return}
+        did=r.data.id;ids[it.name.toLowerCase()]=did;
+      }
+      for(var j=0;j<it.entries.length;j+=200){
+        var rows=it.entries.slice(j,j+200).map(function(e){return{debtor_id:did,type:e.type,date:e.date,amount:e.amount,note:e.note||null}});
+        var r2=await SB.from('entries').insert(rows);
+        if(fail(r2)){t.disabled=false;t.textContent='Spróbuj ponownie';return}
+      }
+    }
+    BKPLAN=null;await load();toast('Przywrócono: '+P.newEntries+' wpisów.');
+  }
   else if(id==='pdfExp'&&d){
     printSettlement(d,{msg:document.getElementById('pdfmsg').value.trim(),due:document.getElementById('pdfdue').value,acct:document.getElementById('pdfacct').value.trim()});
   }
@@ -588,6 +632,24 @@ document.addEventListener('click',async function(e){
 document.addEventListener('change',async function(e){
   var d=cur(); if(!d)return;
   if(e.target.id==='nm'){var v=e.target.value.trim();if(!v)return;var r=await SB.from('debtors').update({name:v}).eq('id',d.id);if(fail(r))return;d.name=v;render()}
+});
+document.addEventListener('change',function(e){
+  if(!e.target||e.target.id!=='bkfile')return;
+  var f=e.target.files&&e.target.files[0];if(!f)return;
+  var out=document.getElementById('bkOut');
+  if(f.size>5000000){toast('Plik jest za duży (max 5 MB).');e.target.value='';return}
+  var r=new FileReader();
+  r.onload=function(){
+    var pr=Loans.parseBackup(String(r.result||''));
+    if(!pr.ok){BKPLAN=null;if(out)out.innerHTML='';toast(pr.error);return}
+    BKPLAN=Loans.planRestore(pr.data,S.debtors);
+    var P=BKPLAN;
+    out.innerHTML='<p class="sub" style="margin:10px 0">Plik: '+esc(f.name)+'. Do dodania: '+P.newEntries+' wpisów i '+P.newDebtors+' nowych dłużników. Pominięto '+P.skipped+', które już są na liście.</p>'+
+      (P.newEntries||P.newDebtors?'<button class="btn" id="bkRestore">Przywróć '+P.newEntries+' wpisów</button>':'<p class="sub">Wszystko z pliku już jest na liście.</p>');
+    toast('');
+  };
+  r.onerror=function(){toast('Nie udało się odczytać pliku.')};
+  r.readAsText(f);e.target.value='';
 });
 document.addEventListener('change',function(e){
   if(!e.target||e.target.id!=='impfile')return;

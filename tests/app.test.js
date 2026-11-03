@@ -185,3 +185,13 @@ test('stara stawka zapisana w bazie jest ignorowana przy wczytywaniu dłużnikó
   assert.match(load, /rate:0/);
   assert.ok(!/rate:\+d\.rate/.test(load), 'load() nie może przenosić stawki z bazy do obliczeń');
 });
+
+test('kopia zapasowa: karta z JSON, CSV i przywracaniem, z potwierdzeniem, limitem pliku i datą ostatniej kopii', () => {
+  const fs = require('node:fs'), app = fs.readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
+  for (const id of ['bkJson', 'bkCsv', 'bkfile', 'bkOut', 'bkRestore']) assert.ok(app.includes(id), id);
+  assert.match(app, /Loans\.buildBackup\(/); assert.match(app, /Loans\.parseBackup\(/); assert.match(app, /Loans\.planRestore\(/);
+  assert.match(app, /f\.size>5000000/); assert.match(app, /Ostatnia kopia/);
+  const restore = app.match(/id==='bkRestore'[\s\S]*?BKPLAN=null;await load/)[0];
+  assert.ok(restore.indexOf('confirm(') >= 0 && restore.indexOf('confirm(') < restore.indexOf('.insert('), 'najpierw potwierdzenie');
+  assert.ok(!/\.delete\(\)|\.update\(/.test(restore), 'przywracanie tylko dodaje');
+});

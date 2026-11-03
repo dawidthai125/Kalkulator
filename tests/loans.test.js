@@ -449,3 +449,62 @@ test('authTransition: brak sesji to wylogowanie', () => {
   assert.equal(L.authTransition({ id: 'a' }, null), 'logout');
   assert.equal(L.authTransition(null, null), 'logout');
 });
+
+// --- Kopia zapasowa ---
+const D = (name, entries, extra) => Object.assign({ name, remind_at: '', remind_note: '', entries }, extra || {});
+const E = (type, date, amount, note) => ({ type, date, amount, note: note || '' });
+
+test('buildBackup: nagłówek, dłużnicy i wpisy bez identyfikatorów i haseł', () => {
+  const b = L.buildBackup([D('Zosia', [Object.assign(E('loan', '2026-10-01', 500, 'Syfon'), { id: 'x' })], { id: 'd1', access: 'zosia', remind_at: '2026-12-01', remind_note: 'oddaj' })], new Date('2026-11-03T10:00:00Z'));
+  assert.equal(b.app, 'dluznik-2.0'); assert.equal(b.version, 1); assert.equal(b.exported_at, '2026-11-03T10:00:00.000Z');
+  assert.deepEqual(b.debtors, [{ name: 'Zosia', remind_at: '2026-12-01', remind_note: 'oddaj', entries: [{ type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' }] }]);
+  assert.ok(!JSON.stringify(b).includes('zosia"'), 'login dłużnika nie trafia do kopii');
+});
+
+test('parseBackup: przyjmuje własny eksport (round-trip) i liczy zawartość', () => {
+  const b = L.buildBackup([D('Zosia', [E('loan', '2026-10-01', 500, 'a'), E('pay', '2026-10-05', 100.5)])], new Date());
+  const r = L.parseBackup(JSON.stringify(b));
+  assert.equal(r.ok, true); assert.deepEqual(r.counts, { debtors: 1, entries: 2 });
+  assert.equal(r.data.debtors[0].entries[1].amount, 100.5);
+});
+
+test('parseBackup: odrzuca wadliwe pliki w całości', () => {
+  const ok = () => JSON.parse(JSON.stringify(L.buildBackup([D('Zosia', [E('loan', '2026-10-01', 500)])], new Date())));
+  const bad = (mut, re) => { const b = ok(); mut(b); const r = L.parseBackup(JSON.stringify(b)); assert.equal(r.ok, false); assert.match(r.error, re); };
+  assert.equal(L.parseBackup('nie json').ok, false);
+  assert.equal(L.parseBackup('[]').ok, false);
+  bad(b => { b.app = 'inna'; }, /nie jest kopią/i);
+  bad(b => { b.version = 2; }, /wersj/i);
+  bad(b => { b.debtors[0].name = ''; }, /nazw/i);
+  bad(b => { b.debtors[0].name = 'x'.repeat(101); }, /nazw/i);
+  bad(b => { b.debtors[0].entries[0].type = 'gift'; }, /rodzaj/i);
+  bad(b => { b.debtors[0].entries[0].date = '2026-13-45'; }, /dat/i);
+  bad(b => { b.debtors[0].entries[0].amount = -5; }, /kwot/i);
+  bad(b => { b.debtors[0].entries[0].amount = '5'; }, /kwot/i);
+  bad(b => { b.debtors[0].entries[0].note = 'x'.repeat(201); }, /opis/i);
+});
+
+test('parseBackup: kwoty zaokrągla do groszy, brak opisu to pusty tekst', () => {
+  const r = L.parseBackup(JSON.stringify({ app: 'dluznik-2.0', version: 1, debtors: [{ name: 'A', entries: [{ type: 'pay', date: '2026-01-02', amount: 10.004 }] }] }));
+  assert.equal(r.ok, true); assert.equal(r.data.debtors[0].entries[0].amount, 10); assert.equal(r.data.debtors[0].entries[0].note, '');
+});
+
+test('backupCsv: BOM, średniki, przecinek dziesiętny, cudzysłowy i ochrona przed formułami', () => {
+  const csv = L.backupCsv(L.buildBackup([D('Jan; "Kowalski"', [E('loan', '2026-10-01', 1234.5, '=HYPERLINK("x")'), E('pay', '2026-10-02', 10, 'ok')])], new Date()));
+  const lines = csv.replace(/^﻿/, '').split('\r\n');
+  assert.ok(csv.startsWith('﻿'));
+  assert.equal(lines[0], 'Dłużnik;Data;Rodzaj;Kwota;Opis');
+  assert.equal(lines[1], '"Jan; ""Kowalski""";2026-10-01;Pożyczka;1234,50;"\'=HYPERLINK(""x"")"');
+  assert.equal(lines[2], '"Jan; ""Kowalski""";2026-10-02;Spłata;10,00;ok');
+});
+
+test('planRestore: tworzy brakujących dłużników, pomija duplikaty, nic nie nadpisuje', () => {
+  const data = L.parseBackup(JSON.stringify(L.buildBackup([
+    D('Zosia', [E('loan', '2026-10-01', 500, 'Syfon'), E('pay', '2026-10-05', 50)], { remind_at: '2026-12-01', remind_note: 'n' }),
+    D('Nowy', [E('loan', '2026-09-01', 20)]),
+  ], new Date()))).data;
+  const p = L.planRestore(data, [{ id: 'd1', name: 'zosia', entries: [E('loan', '2026-10-01', 500)] }]);
+  assert.equal(p.newDebtors, 1); assert.equal(p.newEntries, 2); assert.equal(p.skipped, 1);
+  const z = p.items.find(i => i.name === 'Zosia'); assert.equal(z.exists, 'd1'); assert.equal(z.entries.length, 1); assert.equal(z.entries[0].type, 'pay');
+  const n = p.items.find(i => i.name === 'Nowy'); assert.equal(n.exists, null); assert.equal(n.entries.length, 1);
+});
