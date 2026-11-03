@@ -6,4 +6,4 @@ Statyczna aplikacja: `index.html`. Klucz publishable Supabase w pliku jest publi
 
 Logika liczenia (odsetki, rata, import z Notatek) jest w `loans.js` i ma testy jednostkowe. Uruchomienie: `node --test` (Node 22+, bez zależności).
 
-Struktura: `index.html` (widok), `app.js` (obsługa strony i Supabase), `loans.js` (liczenie), `vendor/supabase.js` (biblioteka wgrana do repo, patrz `vendor/README.md`), `vercel.json` (nagłówki bezpieczeństwa, w tym CSP bez skryptów inline).
+Struktura: `index.html` (widok), `app.js` (obsługa strony i Supabase), `loans.js` (liczenie), `vendor/supabase.js` (biblioteka wgrana do repo, patrz `vendor/README.md`), `vercel.json` (nagłówki bezpieczeństwa, w tym CSP bez skryptów inline), `manifest.webmanifest` i `sw.js` (instalacja na telefonie i tryb offline: aplikacja otwiera się bez internetu, a dane z ostatniego wczytania są tylko do odczytu).
