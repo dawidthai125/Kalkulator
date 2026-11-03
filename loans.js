@@ -246,5 +246,23 @@
     };
   }
 
-  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement };
+  // Login dłużnika bez @ to nazwa nadana przez właściciela; do logowania zamieniamy go na techniczny adres
+  // (zarezerwowana domena .invalid, poczta tam nie dociera). Tekst z @ traktujemy jak zwykły e-mail właściciela.
+  function loginToEmail(v) {
+    v = String(v || '').trim().toLowerCase();
+    return !v ? '' : (v.indexOf('@') >= 0 ? v : v + '@dluznik.invalid');
+  }
+
+  // Ta sama reguła co w bazie (debtor_access.login) i w funkcji serwerowej.
+  function validLogin(v) { return /^[a-z0-9][a-z0-9._-]{2,29}$/.test(String(v || '')); }
+
+  function methodLabel(m) {
+    return { blik: 'BLIK', przelew: 'Przelew', gotowka: 'Gotówka', inne: 'Inna forma' }[m] || 'Inna forma';
+  }
+
+  function statusLabel(s) {
+    return { pending: 'Czeka na akceptację', approved: 'Zaakceptowana', rejected: 'Odrzucona' }[s] || s;
+  }
+
+  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });

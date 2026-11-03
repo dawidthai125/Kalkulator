@@ -67,6 +67,11 @@ td.n,th.n{text-align:right}
 .bar{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .msg{color:var(--warn);font-size:14px;margin:10px 0 0}
 .foot{margin-top:18px;display:flex;justify-content:flex-end}
+.cred{background:var(--bg);border:1px dashed var(--acc);border-radius:10px;padding:10px 12px;margin:0 0 12px;overflow-wrap:anywhere}
+.req{border-top:1px solid var(--line);margin-top:8px}.req:first-of-type{border-top:0}
+.rqs{list-style:none;margin:0;padding:0}.rq{padding:8px 0;border-bottom:1px solid var(--line)}.rq:last-child{border-bottom:0}
+.st{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:1px 10px;margin-left:4px}
+.st.pending{background:#fff3cd;color:#7a5b00}.st.approved{background:#d6f0dd;color:#14602d}.st.rejected{background:#f8d7da;color:#842029}
 /* Dokument rozliczenia (eksport PDF): na ekranie ukryty, w druku jedyna widoczna rzecz */
 #pdfdoc{display:none}
 @page{size:A4;margin:14mm 14mm 20mm;@bottom-center{content:"Strona " counter(page) " z " counter(pages);font:8pt sans-serif;color:#5f726c}}
