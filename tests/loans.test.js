@@ -272,3 +272,19 @@ test('parseNotes: defaultDate dostają tylko wpisy bez daty, a data bez roku lic
   assert.deepEqual(r.rows.map(x => x.date), ['2026-05-08', '2026-05-27', '2026-10-03']);
   assert.equal(P('100 zł x', { defaultDate: '2026-02-30' }).rows[0].date, '2026-11-01');
 });
+
+// --- Zdarzenia logowania Supabase ---
+
+test('authTransition: to samo konto (powrót do karty, odświeżenie tokenu) nie wymaga przeładowania', () => {
+  assert.equal(L.authTransition({ id: 'a' }, { id: 'a', email: 'nowy@x.pl' }), 'same');
+});
+
+test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
+  assert.equal(L.authTransition(null, { id: 'a' }), 'login');
+  assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
+});
+
+test('authTransition: brak sesji to wylogowanie', () => {
+  assert.equal(L.authTransition({ id: 'a' }, null), 'logout');
+  assert.equal(L.authTransition(null, null), 'logout');
+});

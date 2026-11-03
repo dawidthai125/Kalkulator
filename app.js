@@ -9,7 +9,7 @@ function fail(r){if(r&&r.error){toast('Błąd: '+r.error.message);return true}re
 async function load(){
   var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*');
   if(fail(a)||fail(b))return;
-  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:+d.rate,remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
+  S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
   render();
 }
@@ -47,11 +47,9 @@ function render(){
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
   p.innerHTML=dueHtml()+
-  '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label>'+
-  '<label>Oprocentowanie roczne (%)<input id="rt" type="number" min="0" step="0.1" inputmode="decimal" value="'+(d.rate||0)+'"></label></div><p class="msg" id="msg"></p></div>'+
+  '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
-  '<div class="grid"><div>Kapitał do spłaty<b class="'+(c.cap>0?'neg':'')+'">'+fmt.format(c.cap)+'</b></div><div>Naliczone odsetki<b class="'+(c.int>0?'neg':'')+'">'+fmt.format(c.int)+'</b></div>'+
-  '<div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
+  '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
   '<div class="card"><h2>Szybkie dopisanie kwoty (dziś)</h2><div class="row"><label>Kwota (zł)<input id="qa" type="text" inputmode="decimal" placeholder="np. 250" autocomplete="off"></label><label>Opis (opcjonalnie)<input id="qn" maxlength="200" autocomplete="off"></label></div>'+
   '<div class="row" style="margin-top:10px"><button class="btn" id="qLoan" style="background:var(--debt);color:#fff">+ Dług</button><button class="btn" id="qPay" style="background:var(--paid);color:#fff">− Spłata</button></div></div>'+
   '<div class="card"><h2>Dodaj wpis</h2><div class="row"><label>Rodzaj<select id="ty"><option value="loan">Pożyczka</option><option value="pay">Spłata</option></select></label>'+
@@ -251,7 +249,6 @@ document.addEventListener('click',async function(e){
 document.addEventListener('change',async function(e){
   var d=cur(); if(!d)return;
   if(e.target.id==='nm'){var v=e.target.value.trim();if(!v)return;var r=await SB.from('debtors').update({name:v}).eq('id',d.id);if(fail(r))return;d.name=v;render()}
-  else if(e.target.id==='rt'){var v2=Math.max(0,parseFloat(e.target.value)||0);var r=await SB.from('debtors').update({rate:v2}).eq('id',d.id);if(fail(r))return;d.rate=v2;render()}
 });
 document.addEventListener('change',function(e){
   if(!e.target||e.target.id!=='impfile')return;
@@ -269,7 +266,11 @@ document.addEventListener('change',function(e){
 });
 document.addEventListener('input',function(e){if(e.target.id==='mo')plan();else if(e.target.classList&&e.target.classList.contains('sk-am'))refreshImpBtn()});
 SB.auth.onAuthStateChange(function(ev,session){
-  S.user=session?session.user:null;
-  if(S.user)load();else{S.debtors=[];S.sel=null;render()}
+  // Supabase wysyła SIGNED_IN także po każdym powrocie do karty i odświeżeniu tokenu. Przeładowanie widoku
+  // kasowało wtedy wpisywaną kwotę, więc dla tego samego konta tylko zapamiętujemy sesję.
+  var next=session?session.user:null,kind=Loans.authTransition(S.user,next);
+  S.user=next;
+  if(kind==='same')return;
+  if(kind==='login')load();else{S.debtors=[];S.sel=null;render()}
 });
 render();
