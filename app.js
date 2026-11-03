@@ -1,5 +1,5 @@
 var SB=supabase.createClient('https://ukpfrkjikqffojzpdywk.supabase.co','sb_publishable_9coMWsPQsvFtIwNRVEXPiQ_VVyFT8r_');
-var S={debtors:[],sel:null,user:null,editId:null},IMP=[];
+var S={debtors:[],sel:null,user:null,editId:null,pwOpen:false},IMP=[];
 var fmt=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 var today=Loans.today,esc=Loans.esc,calc=Loans.calc,parseNotes=Loans.parseNotes;
 function cur(){return S.debtors.find(function(d){return d.id===S.sel})}
@@ -30,10 +30,10 @@ function render(){
     '<div class="foot"><button class="btn" id="setpw">Zapisz hasło</button></div><p class="msg" id="msg"></p></div>';
     return;
   }
-  bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button>';
+  bar.innerHTML='<span class="sub" style="margin:0">'+esc(S.user.email)+'</span><span style="display:flex;gap:8px"><button class="btn ghost" id="pwToggle" style="color:var(--mute)">Hasło</button><button class="btn ghost" id="logout" style="color:var(--mute)">Wyloguj</button></span>';
   t.innerHTML=S.debtors.map(function(d){return '<button class="tab" role="tab" aria-selected="'+(d.id===S.sel)+'" data-id="'+d.id+'">'+esc(d.name||'Bez nazwy')+'</button>'}).join('')+'<button class="tab" id="addD">+ Dłużnik</button>';
   var d=cur();
-  if(!d){p.innerHTML='<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
+  if(!d){p.innerHTML=pwCard()+'<div class="card"><p class="empty">Dodaj pierwszego dłużnika, aby zacząć liczyć.</p><p class="msg" id="msg"></p></div>';return}
   var c=calc(d),rows=c.sorted.map(function(e){
     if(S.editId===e.id){
       return '<tr class="edit"><td colspan="4"><div class="editrow">'+
@@ -46,7 +46,7 @@ function render(){
     return '<tr><td>'+e.date+'</td><td class="'+e.type+'">'+(e.type==='loan'?'Pożyczka':'Spłata')+(e.note?'<span class="note">'+esc(e.note)+'</span>':'')+'</td><td class="n '+e.type+'">'+fmt.format(e.amount)+'</td>'+
       '<td class="act"><button class="x" data-edit="'+e.id+'" aria-label="Edytuj wpis">✎</button><button class="x" data-del="'+e.id+'" aria-label="Usuń wpis">×</button></td></tr>';
   }).join('');
-  p.innerHTML=dueHtml()+
+  p.innerHTML=pwCard()+dueHtml()+
   '<div class="card"><div class="row"><label>Imię lub nazwa<input id="nm" value="'+esc(d.name)+'"></label></div><p class="msg" id="msg"></p></div>'+
   '<div class="card"><p class="sub">'+(c.owed<0?'Nadpłata':'Do spłaty dziś')+'</p><p class="total '+(c.owed>0?'neg':'pos')+'">'+fmt.format(Math.abs(c.owed))+'</p><p class="sub"></p>'+
   '<div class="grid"><div>Łącznie pożyczono<b class="neg">'+fmt.format(c.lent)+'</b></div><div>Łącznie spłacono<b class="pos">'+fmt.format(c.paid)+'</b></div></div></div>'+
@@ -74,6 +74,12 @@ function render(){
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
   plan();
+}
+// Karta zmiany hasła (otwierana przyciskiem "Hasło" w pasku), dostępna dla każdego zalogowanego konta.
+function pwCard(){
+  if(!S.pwOpen)return '';
+  return '<div class="card"><h2>Zmień hasło</h2><div class="row"><label>Nowe hasło (min. 8 znaków)<input id="pw1" type="password" autocomplete="new-password"></label><label>Powtórz hasło<input id="pw2" type="password" autocomplete="new-password"></label></div>'+
+    '<div class="row" style="margin-top:12px"><button class="btn" id="chpw">Zapisz hasło</button><button class="btn ghost" id="pwCancel" style="color:var(--ink)">Anuluj</button></div><p class="msg"></p></div>';
 }
 function dueHtml(){
   var t=today(),a=S.debtors.filter(function(d){return d.remind_at&&d.remind_at<=t});
@@ -142,13 +148,15 @@ document.addEventListener('click',async function(e){
     if(fail(r))return;
   }
   else if(id==='logout'){await SB.auth.signOut()}
-  else if(id==='setpw'){
+  else if(id==='pwToggle'){S.pwOpen=!S.pwOpen;render();var f1=document.getElementById('pw1');if(f1)f1.focus()}
+  else if(id==='pwCancel'){S.pwOpen=false;render()}
+  else if(id==='setpw'||id==='chpw'){
     var p1=document.getElementById('pw1').value,p2=document.getElementById('pw2').value;
     if(p1.length<8){toast('Hasło musi mieć co najmniej 8 znaków.');return}
     if(p1!==p2){toast('Hasła nie są takie same.');return}
     var ru=await SB.auth.updateUser({password:p1,data:{must_change_password:false}});
     if(fail(ru))return;
-    S.user=ru.data.user;await load();
+    S.user=ru.data.user;S.pwOpen=false;await load();toast('Hasło zostało zmienione.');
   }
   else if(t.dataset.id){S.sel=t.dataset.id;S.editId=null;render()}
   else if(id==='addD'){
