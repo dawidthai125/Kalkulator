@@ -318,6 +318,20 @@
     return { label: String(row.action), text: '' };
   }
 
+  // Gotowy tekst przypomnienia do wysłania dłużnikowi (SMS, komunikator). Tylko kwoty z rozliczenia, bez prywatnych
+  // notatek właściciela. Pusty tekst, gdy nic nie ma do zapłaty. o: { asOf, due, acct }.
+  function reminderText(d, o) {
+    o = o || {};
+    var st = settlement(d, o.asOf);
+    if (st.status !== 'debt') return '';
+    function zl(v) { return (Math.round(v * 100) / 100).toFixed(2).replace('.', ',') + ' zł'; }
+    var t = 'Cześć ' + d.name + '! Przypominam o zwrocie pieniędzy. Do zapłaty zostało ' + zl(st.due) + ' (pożyczono ' + zl(st.lent) + ', spłacono ' + zl(st.paid) + ').';
+    if (o.due && validDate(o.due)) t += ' Termin: ' + datePL(o.due) + '.';
+    var acct = String(o.acct || '').trim();
+    if (acct) t += ' Numer konta lub BLIK: ' + acct + '.';
+    return t + ' Dzięki!';
+  }
+
   // --- Kopia zapasowa ---
   // Kopia to zwykły JSON: dłużnicy i ich wpisy. Bez haseł, loginów dłużników, identyfikatorów i próśb o spłatę.
   function buildBackup(debtors, now) {
@@ -412,5 +426,5 @@
     };
   }
 
-  return { buildBackup: buildBackup, parseBackup: parseBackup, backupCsv: backupCsv, planRestore: planRestore, describeLog: describeLog, markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
+  return { reminderText: reminderText, buildBackup: buildBackup, parseBackup: parseBackup, backupCsv: backupCsv, planRestore: planRestore, describeLog: describeLog, markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });

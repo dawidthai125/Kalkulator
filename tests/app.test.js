@@ -195,3 +195,11 @@ test('kopia zapasowa: karta z JSON, CSV i przywracaniem, z potwierdzeniem, limit
   assert.ok(restore.indexOf('confirm(') >= 0 && restore.indexOf('confirm(') < restore.indexOf('.insert('), 'najpierw potwierdzenie');
   assert.ok(!/\.delete\(\)|\.update\(/.test(restore), 'przywracanie tylko dodaje');
 });
+
+test('przypomnienie dla dłużnika: karta z tekstem do edycji, udostępnianiem i kopiowaniem, bez wysyłania automatycznego', () => {
+  const fs = require('node:fs'), app = fs.readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
+  for (const id of ['rmdue', 'rmacct', 'rmtxt', 'rmShare', 'rmCopy']) assert.ok(app.includes(id), id);
+  assert.match(app, /Loans\.reminderText\(/);
+  const block = app.match(/id==='rmShare'[\s\S]*?\n  \}/)[0];
+  assert.ok(!/SB\./.test(block), 'udostępnianie nie dotyka bazy');
+});

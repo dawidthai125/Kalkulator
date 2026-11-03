@@ -263,3 +263,17 @@ test('kopia zapasowa: przywracanie dodaje brakujące, pomija duplikaty, a zły p
   assert.deepEqual(await page.evaluate(() => window.__db.debtors.map(d => d.name)), ['Zosia', 'Nowy']);
   await ctx.close();
 });
+
+test('przypomnienie dla dłużnika: tekst z kwotą, terminem i kontem, edytowalny; kopiowanie nie psuje strony', async () => {
+  const { page, ctx } = await open(ADMIN);
+  await page.waitForSelector('#rmtxt');
+  assert.match(await page.inputValue('#rmtxt'), /Cześć Zosia!.*500,00 zł/);
+  await page.fill('#rmdue', '2026-12-24'); await page.fill('#rmacct', 'BLIK 123');
+  const v = await page.inputValue('#rmtxt');
+  assert.ok(v.includes('Termin: 24.12.2026') && v.includes('BLIK 123'), v);
+  await page.fill('#rmtxt', 'Moja treść'); await page.click('#rmCopy');
+  await page.waitForSelector('#rmOut p');
+  assert.equal(await page.inputValue('#rmtxt'), 'Moja treść');
+  assert.deepEqual(page.errs, []);
+  await ctx.close();
+});
