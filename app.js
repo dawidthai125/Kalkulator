@@ -70,6 +70,10 @@ function render(){
   '<div class="row" style="margin-bottom:10px"><label>Stawka za godzinę (zł), puste = z notatki<input id="hrate" type="number" min="0" step="0.5" inputmode="decimal" placeholder="np. 40"></label>'+
   '<label>Data dla wpisów bez daty (puste = dziś)<input id="idate" type="date"></label></div>'+
   '<button class="btn" id="prev">Podgląd importu</button><div id="impOut" class="imp"></div></div>'+
+  '<div class="card"><h2>Eksport do PDF (dla dłużnika)</h2><p class="sub">Ładne rozliczenie do pokazania lub wysłania dłużnikowi: lista długów, spłaty i kwota końcowa. Pola poniżej są opcjonalne. Otworzy się okno drukowania, wybierz w nim „Zapisz jako PDF” (iPhone: Udostępnij → Zapisz w Plikach).</p>'+
+  '<div class="row"><label class="wide">Wiadomość do dłużnika<textarea id="pdfmsg" maxlength="400" style="min-height:72px" placeholder="np. Cześć, wysyłam rozliczenie. Daj znać, kiedy możesz oddać."></textarea></label>'+
+  '<label>Termin zapłaty<input id="pdfdue" type="date"></label><label>Numer konta lub BLIK<input id="pdfacct" maxlength="80" autocomplete="off"></label></div>'+
+  '<div class="row" style="margin-top:10px"><button class="btn" id="pdfExp">Pobierz PDF</button></div></div>'+
   '<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
@@ -131,6 +135,30 @@ function manualRows(who){
 function refreshImpBtn(){
   var b=document.getElementById('doImp');if(!b||b.disabled)return;
   b.textContent='Importuj '+(IMP.length+manualRows('').length)+' wpisów';
+}
+// Dokument rozliczenia dla dłużnika (drukowany / zapisywany jako PDF). o = { msg, due, acct } z formularza.
+function pdfHtml(d,o){
+  var s=Loans.settlement(d),now=Loans.datePL(today());
+  function table(list,empty){
+    if(!list.length)return '<p class="pdf-empty">'+empty+'</p>';
+    return '<table class="pdf-t"><thead><tr><th class="c">Lp.</th><th class="d">Data</th><th>Opis</th><th class="n">Kwota</th></tr></thead><tbody>'+
+      list.map(function(x,i){return '<tr><td class="c">'+(i+1)+'</td><td>'+Loans.datePL(x.date)+'</td><td>'+(x.note?esc(x.note):'—')+'</td><td class="n">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table>';
+  }
+  var head=s.status==='debt'?'Do zapłaty':s.status==='over'?'Nadpłata':'Rozliczone w całości',cls=s.status==='debt'?'debt':'ok',meta=[];
+  if(s.status==='debt'&&o.due)meta.push('Termin zapłaty: <b>'+esc(Loans.datePL(o.due))+'</b>');
+  if(o.acct)meta.push('Numer konta / BLIK: <b>'+esc(o.acct)+'</b>');
+  return '<header class="pdf-head"><img src="icon-192.png" width="56" height="56" alt=""><div class="pdf-brand"><b>Dłużnik 2.0</b><span>„Jak zapomnisz, ile pożyczyłeś, to stracisz”</span></div><div class="pdf-date">Stan na<br><b>'+now+'</b></div></header>'+
+    '<h1 class="pdf-title">Rozliczenie pożyczek</h1><p class="pdf-for">Dla: <b>'+esc(d.name||'Bez nazwy')+'</b></p>'+
+    '<p class="pdf-intro">Poniżej przejrzyste zestawienie wszystkich pożyczek i spłat. Kwota do zapłaty to suma pożyczek pomniejszona o dotychczasowe spłaty.</p>'+
+    (o.msg?'<div class="pdf-msg">'+esc(o.msg).replace(/\n/g,'<br>')+'</div>':'')+
+    '<div class="pdf-sum"><div><span>Łącznie pożyczono</span><b>'+fmt.format(s.lent)+'</b></div><div><span>Łącznie spłacono</span><b>'+fmt.format(s.paid)+'</b></div><div class="pdf-due '+cls+'"><span>'+head+'</span><b>'+fmt.format(s.due)+'</b></div></div>'+
+    (meta.length?'<p class="pdf-meta">'+meta.join(' &nbsp;·&nbsp; ')+'</p>':'')+
+    '<h2>Lista długów ('+s.loans.length+')</h2>'+table(s.loans,'Brak zapisanych pożyczek.')+
+    (s.loans.length?'<p class="pdf-subtotal">Razem pożyczono: <b>'+fmt.format(s.lent)+'</b></p>':'')+
+    '<h2>Rozliczenia, czyli spłaty ('+s.pays.length+')</h2>'+table(s.pays,'Brak spłat do tej pory.')+
+    (s.pays.length?'<p class="pdf-subtotal">Razem spłacono: <b>'+fmt.format(s.paid)+'</b></p>':'')+
+    '<div class="pdf-final '+cls+'">'+head+': <b>'+fmt.format(s.due)+'</b></div>'+
+    '<footer class="pdf-foot">Dokument wygenerowano '+now+' w systemie <b>Dłużnik 2.0</b> · Dawid Thai Thanh · Zestawienie ma charakter informacyjny.</footer>';
 }
 function exportText(all){
   var list=all?S.debtors:[cur()].filter(Boolean);
@@ -245,6 +273,15 @@ document.addEventListener('click',async function(e){
     }
     var r2=await SB.from('entries').insert(rows);if(fail(r2)){t.disabled=false;t.textContent='Importuj '+ALL.length+' wpisów';return}
     IMP=[];await load();
+  }
+  else if(id==='pdfExp'&&d){
+    var po={msg:document.getElementById('pdfmsg').value.trim(),due:document.getElementById('pdfdue').value,acct:document.getElementById('pdfacct').value.trim()};
+    var host=document.getElementById('pdfdoc');
+    if(!host){host=document.createElement('div');host.id='pdfdoc';document.body.appendChild(host)}
+    host.innerHTML=pdfHtml(d,po);
+    var oldTitle=document.title;document.title='Rozliczenie - '+d.name+' - '+today(); // podpowiedź nazwy pliku PDF
+    window.onafterprint=function(){host.innerHTML='';document.title=oldTitle;window.onafterprint=null};
+    window.print();
   }
   else if(id==='expOne'||id==='expAll'){
     var txt=exportText(id==='expAll');box=document.getElementById('expOut');

@@ -284,6 +284,42 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Rozliczenie dla dłużnika (eksport PDF) ---
+
+test('datePL: RRRR-MM-DD na DD.MM.RRRR, a puste lub błędne zostaje bez zmian', () => {
+  assert.equal(L.datePL('2026-11-03'), '03.11.2026');
+  assert.equal(L.datePL(''), '');
+  assert.equal(L.datePL('wczoraj'), 'wczoraj');
+});
+
+test('settlement: dzieli wpisy na długi i spłaty, sortuje po dacie i sumuje', () => {
+  const d = { rate: 0, entries: [
+    pay('2026-03-01', 100), loan('2026-02-01', 500), loan('2026-01-01', 250.5), pay('2026-02-15', 50),
+  ] };
+  const s = L.settlement(d, '2026-04-01');
+  assert.deepEqual(s.loans.map(x => x.date), ['2026-01-01', '2026-02-01']);
+  assert.deepEqual(s.pays.map(x => x.date), ['2026-02-15', '2026-03-01']);
+  assert.equal(s.lent, 750.5); assert.equal(s.paid, 150);
+  assert.equal(s.due, 600.5); assert.equal(s.status, 'debt');
+});
+
+test('settlement: opis wpisu trafia do wiersza, brak opisu to pusty napis', () => {
+  const s = L.settlement({ rate: 0, entries: [{ type: 'loan', date: '2026-01-01', amount: 10, note: 'Syfon' }, loan('2026-01-02', 5)] }, '2026-02-01');
+  assert.deepEqual(s.loans.map(x => x.note), ['Syfon', '']);
+});
+
+test('settlement: status rozliczone (0 zł) i nadpłata (kwota dodatnia, status over)', () => {
+  const settled = L.settlement({ rate: 0, entries: [loan('2026-01-01', 100), pay('2026-01-02', 100)] }, '2026-02-01');
+  assert.equal(settled.status, 'settled'); assert.equal(settled.due, 0);
+  const over = L.settlement({ rate: 0, entries: [loan('2026-01-01', 100), pay('2026-01-02', 130)] }, '2026-02-01');
+  assert.equal(over.status, 'over'); assert.equal(over.due, 30);
+});
+
+test('settlement: dłużnik bez wpisów nie powoduje błędu', () => {
+  const s = L.settlement({ rate: 0, entries: [] }, '2026-02-01');
+  assert.deepEqual([s.loans.length, s.pays.length, s.lent, s.paid, s.due, s.status], [0, 0, 0, 0, 0, 'settled']);
+});
+
 // --- Pole kwoty przyjmuje tylko liczby ---
 
 test('numOnly: litery i inne znaki są odrzucane, zostaje sama liczba', () => {
