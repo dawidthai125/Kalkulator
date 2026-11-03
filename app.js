@@ -221,7 +221,7 @@ function render(){
   '<div class="row"><label class="wide">Wiadomość do dłużnika<textarea id="pdfmsg" maxlength="400" style="min-height:72px" placeholder="np. Cześć, wysyłam rozliczenie. Daj znać, kiedy możesz oddać."></textarea></label>'+
   '<label>Termin zapłaty<input id="pdfdue" type="date"></label><label>Numer konta lub BLIK<input id="pdfacct" maxlength="80" autocomplete="off"></label></div>'+
   '<div class="row" style="margin-top:10px"><button class="btn" id="pdfExp">Pobierz PDF</button></div></div>'+
-  accessCard(d)+backupCard()+'<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
+  reminderCard(d)+accessCard(d)+backupCard()+'<div class="card"><h2>Eksport do Notatek (iPhone)</h2><p class="sub">Otworzy się menu udostępniania. Wybierz w nim Notatki. Format jest taki sam jak w imporcie.</p>'+
   '<div class="row"><button class="btn" id="expOne">Ten dłużnik</button><button class="btn" id="expAll">Wszyscy dłużnicy</button></div><div id="expOut"></div></div>'+
   '<div class="foot"><button class="btn ghost" id="delD">Usuń dłużnika</button></div>';
   plan();
@@ -248,6 +248,15 @@ async function doBackup(kind){
   if(kind==='csv')ok=await saveFile('dluznik-kopia-'+stamp+'.csv',Loans.backupCsv(b),'text/csv;charset=utf-8');
   else ok=await saveFile('dluznik-kopia-'+stamp+'.json',JSON.stringify(b,null,2),'application/json');
   if(ok){try{localStorage.setItem('dluznik-last-backup',Loans.datePL(stamp))}catch(e){}var bl=document.getElementById('bkLast');if(bl)bl.textContent=' Ostatnia kopia: '+Loans.datePL(stamp)+'.';toast('Zapisano kopię: '+b.debtors.length+' dłużników.')}
+}
+// --- Przypomnienie dla dłużnika: gotowy tekst do wysłania (nic nie wychodzi z aplikacji bez Twojego kliknięcia) ---
+function reminderCard(d){
+  var t=Loans.reminderText(d,{asOf:today()});
+  if(!t)return '';
+  return '<div class="card"><h2>Przypomnienie dla dłużnika</h2><p class="sub">Gotowa wiadomość z kwotą do zapłaty. Możesz ją poprawić, a potem wysłać SMS-em lub w komunikatorze. Aplikacja niczego nie wysyła sama.</p>'+
+  '<div class="row"><label>Termin zapłaty<input id="rmdue" type="date"></label><label>Numer konta lub BLIK<input id="rmacct" maxlength="80" autocomplete="off"></label>'+
+  '<label class="wide">Treść<textarea id="rmtxt" maxlength="600" style="min-height:96px">'+esc(t)+'</textarea></label></div>'+
+  '<div class="row" style="margin-top:10px"><button class="btn" id="rmShare">Wyślij…</button><button class="btn ghost" id="rmCopy">Kopiuj</button></div><div id="rmOut"></div></div>';
 }
 // Karta zmiany hasła (otwierana przyciskiem "Hasło" w pasku), dostępna dla każdego zalogowanego konta.
 function pwCard(){
@@ -614,6 +623,12 @@ document.addEventListener('click',async function(e){
     }
     BKPLAN=null;await load();toast('Przywrócono: '+P.newEntries+' wpisów.');
   }
+  else if(id==='rmShare'||id==='rmCopy'){
+    var rt=document.getElementById('rmtxt').value.trim(),ro=document.getElementById('rmOut');
+    if(!rt){ro.innerHTML='<p class="sub">Wpisz treść wiadomości.</p>';return}
+    var rcopy=function(){try{navigator.clipboard.writeText(rt).then(function(){ro.innerHTML='<p class="sub" style="margin-top:10px">Skopiowano. Wklej w SMS-ie lub komunikatorze.</p>'},function(){ro.innerHTML='<p class="sub" style="margin-top:10px">Skopiuj tekst z pola ręcznie.</p>'})}catch(err){ro.innerHTML='<p class="sub" style="margin-top:10px">Skopiuj tekst z pola ręcznie.</p>'}};
+    if(id==='rmShare'&&navigator.share){navigator.share({text:rt}).catch(function(err){if(err&&err.name!=='AbortError')rcopy()})}else rcopy();
+  }
   else if(id==='pdfExp'&&d){
     printSettlement(d,{msg:document.getElementById('pdfmsg').value.trim(),due:document.getElementById('pdfdue').value,acct:document.getElementById('pdfacct').value.trim()});
   }
@@ -668,6 +683,7 @@ document.addEventListener('change',function(e){
 document.addEventListener('input',function(e){
   var t=e.target,isAm=t.id==='qa'||t.id==='dq'||(t.classList&&t.classList.contains('sk-am'));
   if(isAm){var clean=Loans.numOnly(t.value);if(clean!==t.value)t.value=clean}  // pole kwoty: tylko liczby
+  if(t.id==='rmdue'||t.id==='rmacct'){var rd=cur(),rx=document.getElementById('rmtxt');if(rd&&rx)rx.value=Loans.reminderText(rd,{asOf:today(),due:document.getElementById('rmdue').value,acct:document.getElementById('rmacct').value})||rx.value}
   if(t.id==='mo')plan();else if(t.classList&&t.classList.contains('sk-am'))refreshImpBtn()
 });
 SB.auth.onAuthStateChange(function(ev,session){

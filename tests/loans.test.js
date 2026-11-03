@@ -508,3 +508,21 @@ test('planRestore: tworzy brakujących dłużników, pomija duplikaty, nic nie n
   const z = p.items.find(i => i.name === 'Zosia'); assert.equal(z.exists, 'd1'); assert.equal(z.entries.length, 1); assert.equal(z.entries[0].type, 'pay');
   const n = p.items.find(i => i.name === 'Nowy'); assert.equal(n.exists, null); assert.equal(n.entries.length, 1);
 });
+
+// --- Przypomnienie dla dłużnika (gotowy tekst do wysłania) ---
+test('reminderText: kwota do zapłaty, termin i konto; nic gdy dług rozliczony', () => {
+  const d = { name: 'Zosia', rate: 0, entries: [E('loan', '2026-10-01', 500), E('pay', '2026-10-05', 100.5)] };
+  const t = L.reminderText(d, { asOf: '2026-11-03', due: '2026-11-20', acct: 'BLIK 600 100 200' });
+  assert.match(t, /^Cześć Zosia!/); assert.match(t, /399,50 zł/); assert.match(t, /20\.11\.2026/); assert.match(t, /BLIK 600 100 200/);
+  assert.match(t, /500,00 zł/); assert.match(t, /100,50 zł/);
+  const bare = L.reminderText(d, { asOf: '2026-11-03' });
+  assert.ok(!/Termin/.test(bare) && !/konto/i.test(bare));
+  assert.equal(L.reminderText({ name: 'A', rate: 0, entries: [E('loan', '2026-10-01', 50), E('pay', '2026-10-02', 50)] }, { asOf: '2026-11-03' }), '');
+  assert.equal(L.reminderText({ name: 'A', rate: 0, entries: [] }, { asOf: '2026-11-03' }), '');
+});
+
+test('reminderText: nieprawidłowy termin jest pomijany, a tekst nie zawiera wewnętrznych danych', () => {
+  const d = { name: 'Jan', rate: 0, remind_note: 'PRYWATNA NOTATKA', entries: [E('loan', '2026-10-01', 80, 'sekretny opis')] };
+  const t = L.reminderText(d, { asOf: '2026-11-03', due: 'jutro' });
+  assert.ok(!/Termin/.test(t)); assert.ok(!/PRYWATNA|sekretny/.test(t), t);
+});
