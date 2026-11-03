@@ -158,7 +158,8 @@ function pdfHtml(d,o){
     '<h2>Rozliczenia, czyli spłaty ('+s.pays.length+')</h2>'+table(s.pays,'Brak spłat do tej pory.')+
     (s.pays.length?'<p class="pdf-subtotal">Razem spłacono: <b>'+fmt.format(s.paid)+'</b></p>':'')+
     '<div class="pdf-final '+cls+'">'+head+': <b>'+fmt.format(s.due)+'</b></div>'+
-    '<footer class="pdf-foot">Dokument wygenerowano '+now+' w systemie <b>Dłużnik 2.0</b> · Dawid Thai Thanh · Zestawienie ma charakter informacyjny.</footer>';
+    '<footer class="pdf-foot"><div>System <b>Dłużnik 2.0</b> stworzony przez <b>Dawida Thai Thanh</b><br>na potrzeby odzyskania pieniążków, założonych, pożyczonych i w ogóle :D</div>'+
+    '<div class="pdf-foot-sub">Dokument wygenerowano '+now+'. Zestawienie ma charakter informacyjny.</div></footer>';
 }
 function exportText(all){
   var list=all?S.debtors:[cur()].filter(Boolean);
