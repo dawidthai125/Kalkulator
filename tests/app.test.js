@@ -77,6 +77,52 @@ test('dostęp dłużnika: kwota zgłoszenia przyjmuje tylko liczby', () => {
   assert.match(input, /id==='dq'/);
 });
 
+test('odświeżanie po powrocie: widoczność karty, okresowo, bez gubienia wpisywanego tekstu', () => {
+  const app = read('app.js');
+  assert.match(app, /addEventListener\('visibilitychange'/); assert.match(app, /setInterval\(softRefresh/);
+  assert.match(app, /Loans\.shouldRefresh\(/); assert.match(app, /load\(\{soft:true\}\)/);
+  const soft = app.match(/async function softRefresh\(\)[\s\S]*?\n\}/)[0];
+  assert.match(soft, /hasDraft\(\)/, 'wpisany niezapisany tekst blokuje odświeżenie');
+  const load = app.match(/async function load\([\s\S]*?\n\}/)[0];
+  assert.match(load, /JSON\.stringify/, 'bez zmian w danych nie przerysowujemy widoku');
+});
+
+test('usuwanie wpisu pyta o potwierdzenie', () => {
+  const app = read('app.js');
+  const del = app.match(/else if\(t\.dataset\.del&&d\)\{[^\n]*\}/)[0];
+  assert.match(del, /confirm\(/);
+  assert.ok(del.indexOf('confirm(') < del.indexOf("from('entries').delete()"), 'najpierw pytanie, potem usunięcie');
+});
+
+test('import: wykrywa duplikaty, pozwala je pominąć i liczy tylko to, co faktycznie trafi na listę', () => {
+  const app = read('app.js');
+  assert.match(app, /Loans\.markDuplicates\(/); assert.match(app, /id="skipdup"/); assert.match(app, /już jest/);
+  const doImp = app.slice(app.indexOf("id==='doImp'"), app.indexOf("id==='pdfExp'"));
+  assert.match(doImp, /impActive\(\)/, 'import bierze pod uwagę pomijanie duplikatów');
+});
+
+test('PDF dla dłużnika: przycisk w widoku dłużnika korzysta z tego samego dokumentu co właściciel', () => {
+  const app = read('app.js');
+  assert.match(app, /id="dPdf"/); assert.match(app, /function printSettlement\(/);
+  const debtorView = app.match(/function renderDebtor\(\)[\s\S]*?\n\}/)[0];
+  assert.match(debtorView, /id="dPdf"/);
+  assert.match(app, /id==='dPdf'/);
+});
+
+test('konto dłużnika z odebranym dostępem jest wylogowywane zamiast pokazywać widok właściciela', () => {
+  const load = read('app.js').match(/async function load\([\s\S]*?\n\}/)[0];
+  assert.match(load, /role==='debtor'/); assert.match(load, /signOut\(\)/); assert.match(load, /Dostęp do tego konta został wyłączony/);
+});
+
+test('zmiana hasła zachowuje znacznik roli konta dłużnika', () => {
+  assert.match(read('app.js'), /updateUser\(\{password:p1,data:\{must_change_password:false,role:/);
+});
+
+test('widok dłużnika ma informację o prywatności', () => {
+  const debtorView = read('app.js').match(/function renderDebtor\(\)[\s\S]*?\n\}/)[0];
+  assert.match(debtorView, /Prywatność/); assert.match(debtorView, /Frankfurt/);
+});
+
 test('eksport PDF: przycisk, dokument z rozliczeniem i druk', () => {
   const app = read('app.js');
   assert.match(app, /id="pdfExp"/, 'brak przycisku eksportu PDF');
@@ -116,7 +162,7 @@ test('eksport PDF: arkusz druku (A4, ukrycie reszty strony, stopka, numeracja st
 });
 
 test('stara stawka zapisana w bazie jest ignorowana przy wczytywaniu dłużników', () => {
-  const load = read('app.js').match(/async function load\(\)[\s\S]*?\n\}/)[0];
+  const load = read('app.js').match(/async function load\([^)]*\)[\s\S]*?\n\}/)[0];
   assert.match(load, /rate:0/);
   assert.ok(!/rate:\+d\.rate/.test(load), 'load() nie może przenosić stawki z bazy do obliczeń');
 });

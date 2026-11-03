@@ -277,5 +277,26 @@
     return o;
   }
 
-  return { urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
+  // Oznacza wiersze importu, które już są na liście (ta sama data, rodzaj i kwota). Liczy krotność: jeśli na liście
+  // jest jeden taki wpis, a import ma dwa, to tylko jeden jest duplikatem. existingFor(who) zwraca istniejące wpisy
+  // dłużnika o tej nazwie. Zwraca nowe obiekty z polem dup, wejścia nie zmienia.
+  function markDuplicates(rows, existingFor) {
+    var left = {};
+    function key(e) { return e.date + '|' + e.type + '|' + (Math.round(e.amount * 100) / 100).toFixed(2); }
+    return rows.map(function (r) {
+      var who = String(r.who || '').toLowerCase();
+      if (!left[who]) { left[who] = {}; (existingFor(r.who) || []).forEach(function (e) { left[who][key(e)] = (left[who][key(e)] || 0) + 1; }); }
+      var k = key(r), dup = (left[who][k] || 0) > 0;
+      if (dup) left[who][k]--;
+      return Object.assign({}, r, { dup: dup });
+    });
+  }
+
+  // Czy teraz odświeżyć dane po cichu: karta widoczna, ktoś zalogowany, nic się nie ładuje, nikt nic nie wpisuje
+  // i minęło co najmniej minMs od poprzedniego wczytania.
+  function shouldRefresh(o) {
+    return !o.hidden && !!o.loggedIn && !o.busy && !o.typing && (o.now - o.last) >= o.minMs;
+  }
+
+  return { markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });

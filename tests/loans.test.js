@@ -284,6 +284,36 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Duplikaty w imporcie i odświeżanie ---
+
+test('markDuplicates: ta sama data, rodzaj i kwota co istniejący wpis to duplikat (z licznością)', () => {
+  const existing = { jan: [{ date: '2026-10-01', type: 'loan', amount: 500 }] };
+  const rows = [
+    { who: 'Jan', date: '2026-10-01', type: 'loan', amount: 500 },
+    { who: 'Jan', date: '2026-10-01', type: 'loan', amount: 500.0 }, // drugi taki sam: istnieje tylko jeden, więc ten jest nowy
+    { who: 'Jan', date: '2026-10-02', type: 'loan', amount: 500 },
+    { who: 'Jan', date: '2026-10-01', type: 'pay', amount: 500 },
+    { who: 'Ala', date: '2026-10-01', type: 'loan', amount: 500 },
+  ];
+  const r = L.markDuplicates(rows, who => existing[who.toLowerCase()] || []);
+  assert.deepEqual(r.map(x => x.dup), [true, false, false, false, false]);
+  assert.equal(rows[0].dup, undefined, 'wejście nie jest mutowane');
+});
+
+test('markDuplicates: kwoty porównywane co do grosza, a pusta lista istniejących nic nie oznacza', () => {
+  const r = L.markDuplicates([{ who: 'X', date: '2026-01-01', type: 'pay', amount: 10.1 }], () => [{ date: '2026-01-01', type: 'pay', amount: 10.10000001 }]);
+  assert.equal(r[0].dup, true);
+  assert.equal(L.markDuplicates([{ who: 'X', date: '2026-01-01', type: 'pay', amount: 1 }], () => [])[0].dup, false);
+});
+
+test('shouldRefresh: tylko widoczna karta, zalogowany, bez wpisywania i nie częściej niż co minMs', () => {
+  const ok = { hidden: false, loggedIn: true, busy: false, typing: false, last: 0, now: 30000, minMs: 20000 };
+  assert.equal(L.shouldRefresh(ok), true);
+  for (const bad of [{ hidden: true }, { loggedIn: false }, { busy: true }, { typing: true }, { now: 10000 }]) {
+    assert.equal(L.shouldRefresh({ ...ok, ...bad }), false, JSON.stringify(bad));
+  }
+});
+
 // --- Powiadomienia push ---
 
 test('urlBase64ToUint8Array: klucz base64url (bez dopełnienia) na bajty, jak wymaga PushManager.subscribe', () => {
