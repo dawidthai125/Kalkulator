@@ -318,5 +318,99 @@
     return { label: String(row.action), text: '' };
   }
 
-  return { describeLog: describeLog, markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
+  // --- Kopia zapasowa ---
+  // Kopia to zwykły JSON: dłużnicy i ich wpisy. Bez haseł, loginów dłużników, identyfikatorów i próśb o spłatę.
+  function buildBackup(debtors, now) {
+    return {
+      app: 'dluznik-2.0', version: 1, exported_at: (now || new Date()).toISOString(),
+      debtors: debtors.map(function (d) {
+        return {
+          name: d.name, remind_at: d.remind_at || '', remind_note: d.remind_note || '',
+          entries: d.entries.map(function (e) { return { type: e.type, date: e.date, amount: e.amount, note: e.note || '' }; })
+        };
+      })
+    };
+  }
+
+  function validDate(s) {
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    var d = new Date(s + 'T00:00:00Z');
+    return !isNaN(d) && d.toISOString().slice(0, 10) === s;
+  }
+
+  // Wczytuje i sprawdza plik kopii. Każdy błąd odrzuca cały plik, żeby nie wgrać połowy danych.
+  function parseBackup(text) {
+    var b;
+    function no(msg) { return { ok: false, error: msg }; }
+    try { b = JSON.parse(String(text).replace(/^﻿/, '')); } catch (e) { return no('To nie jest poprawny plik JSON.'); }
+    if (!b || typeof b !== 'object' || Array.isArray(b) || b.app !== 'dluznik-2.0') return no('Ten plik nie jest kopią zapasową z tej aplikacji.');
+    if (b.version !== 1) return no('Nieobsługiwana wersja kopii.');
+    if (!Array.isArray(b.debtors) || b.debtors.length > 500) return no('Nieprawidłowa lista dłużników (max 500).');
+    var total = 0, out = [];
+    for (var i = 0; i < b.debtors.length; i++) {
+      var d = b.debtors[i], at = 'Dłużnik ' + (i + 1) + ': ';
+      if (!d || typeof d !== 'object') return no(at + 'nieprawidłowe dane.');
+      var name = typeof d.name === 'string' ? d.name.trim() : '';
+      if (!name || name.length > 100) return no(at + 'nazwa musi mieć od 1 do 100 znaków.');
+      if (!Array.isArray(d.entries)) return no(at + 'brak listy wpisów.');
+      var ra = d.remind_at == null || d.remind_at === '' ? '' : d.remind_at;
+      if (ra !== '' && !validDate(ra)) return no(at + 'nieprawidłowa data przypomnienia.');
+      var rn = d.remind_note == null ? '' : d.remind_note;
+      if (typeof rn !== 'string' || rn.length > 200) return no(at + 'nieprawidłowy opis przypomnienia.');
+      var ents = [];
+      for (var j = 0; j < d.entries.length; j++) {
+        var e = d.entries[j], w = at + 'wpis ' + (j + 1) + ': ';
+        if (++total > 50000) return no('Za dużo wpisów (max 50 000).');
+        if (!e || typeof e !== 'object') return no(w + 'nieprawidłowe dane.');
+        if (e.type !== 'loan' && e.type !== 'pay') return no(w + 'nieznany rodzaj.');
+        if (!validDate(e.date)) return no(w + 'nieprawidłowa data.');
+        if (typeof e.amount !== 'number' || !isFinite(e.amount) || Math.round(e.amount * 100) < 1 || e.amount > 1e9) return no(w + 'kwota musi być liczbą większą od zera.');
+        var note = e.note == null ? '' : e.note;
+        if (typeof note !== 'string' || note.length > 200) return no(w + 'opis może mieć najwyżej 200 znaków.');
+        ents.push({ type: e.type, date: e.date, amount: Math.round(e.amount * 100) / 100, note: note });
+      }
+      out.push({ name: name, remind_at: ra, remind_note: rn, entries: ents });
+    }
+    return { ok: true, data: { app: b.app, version: 1, exported_at: b.exported_at || '', debtors: out }, counts: { debtors: out.length, entries: total } };
+  }
+
+  // CSV pod Excela: BOM, średniki, przecinek dziesiętny. Komórki zaczynające się od = + - @ dostają apostrof (formuły).
+  function backupCsv(backup) {
+    function cell(v) {
+      v = String(v == null ? '' : v);
+      if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+      return /[;"\r\n]/.test(v) || v.charAt(0) === "'" ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }
+    var lines = ['Dłużnik;Data;Rodzaj;Kwota;Opis'];
+    backup.debtors.forEach(function (d) {
+      d.entries.forEach(function (e) {
+        lines.push([cell(d.name), e.date, e.type === 'loan' ? 'Pożyczka' : 'Spłata', (Math.round(e.amount * 100) / 100).toFixed(2).replace('.', ','), cell(e.note)].join(';'));
+      });
+    });
+    return '﻿' + lines.join('\r\n');
+  }
+
+  // Plan wczytania kopii: tylko dodawanie. Istniejących dłużników rozpoznaje po nazwie, wpisy już obecne pomija.
+  function planRestore(data, existing) {
+    var byName = {};
+    existing.forEach(function (d) { byName[d.name.toLowerCase()] = d; });
+    var rows = [];
+    data.debtors.forEach(function (d, i) { d.entries.forEach(function (e) { rows.push({ who: d.name, i: i, type: e.type, date: e.date, amount: e.amount, note: e.note }); }); });
+    var marked = markDuplicates(rows, function (who) { var k = byName[String(who).toLowerCase()]; return k ? k.entries : []; });
+    var items = data.debtors.map(function (d, i) {
+      var k = byName[d.name.toLowerCase()];
+      return {
+        name: d.name, exists: k ? k.id : null, remind_at: d.remind_at, remind_note: d.remind_note,
+        entries: marked.filter(function (m) { return m.i === i && !m.dup; }).map(function (m) { return { type: m.type, date: m.date, amount: m.amount, note: m.note }; })
+      };
+    });
+    return {
+      items: items,
+      newDebtors: items.filter(function (x) { return !x.exists; }).length,
+      newEntries: items.reduce(function (a, x) { return a + x.entries.length; }, 0),
+      skipped: marked.filter(function (m) { return m.dup; }).length
+    };
+  }
+
+  return { buildBackup: buildBackup, parseBackup: parseBackup, backupCsv: backupCsv, planRestore: planRestore, describeLog: describeLog, markDuplicates: markDuplicates, shouldRefresh: shouldRefresh, urlBase64ToUint8Array: urlBase64ToUint8Array, isNetworkError: isNetworkError, today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly, datePL: datePL, settlement: settlement, loginToEmail: loginToEmail, validLogin: validLogin, methodLabel: methodLabel, statusLabel: statusLabel };
 });

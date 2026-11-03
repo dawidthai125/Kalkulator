@@ -228,3 +228,38 @@ test('powiadomienia push: włączenie zapisuje subskrypcję, a bez instalacji na
   assert.equal(await ios.page.locator('#pushOn').count(), 0);
   await ios.ctx.close();
 });
+
+test('kopia zapasowa: pobranie JSON i CSV (z BOM) oraz data ostatniej kopii', async () => {
+  const { page, ctx } = await open(ADMIN);
+  await page.waitForSelector('#bkJson');
+  const [dj] = await Promise.all([page.waitForEvent('download'), page.click('#bkJson')]);
+  assert.match(dj.suggestedFilename(), /^dluznik-kopia-\d{4}-\d{2}-\d{2}\.json$/);
+  const j = JSON.parse(fs.readFileSync(await dj.path(), 'utf8'));
+  assert.equal(j.app, 'dluznik-2.0'); assert.equal(j.debtors[0].name, 'Zosia'); assert.equal(j.debtors[0].entries[0].amount, 500);
+  const [dc] = await Promise.all([page.waitForEvent('download'), page.click('#bkCsv')]);
+  const csv = fs.readFileSync(await dc.path(), 'utf8');
+  assert.ok(csv.startsWith('﻿Dłużnik;Data;Rodzaj;Kwota;Opis') && csv.includes('Zosia;2026-10-01;Pożyczka;500,00;Syfon'), csv);
+  assert.ok((await text(page)).includes('Ostatnia kopia:'));
+  await ctx.close();
+});
+
+test('kopia zapasowa: przywracanie dodaje brakujące, pomija duplikaty, a zły plik jest odrzucany', async () => {
+  const { page, ctx } = await open(ADMIN);
+  await page.waitForSelector('#bkfile');
+  const mk = o => ({ name: 'k.json', mimeType: 'application/json', buffer: Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)) });
+  await page.setInputFiles('#bkfile', mk('{"zly":1}'));
+  await page.waitForFunction(() => /nie jest kopią/.test(document.body.innerText));
+  assert.equal(await page.locator('#bkRestore').count(), 0);
+  const good = { app: 'dluznik-2.0', version: 1, debtors: [
+    { name: 'Zosia', entries: [{ type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' }, { type: 'pay', date: '2026-10-09', amount: 50, note: '' }] },
+    { name: 'Nowy', entries: [{ type: 'loan', date: '2026-09-01', amount: 20, note: '' }] }] };
+  await page.setInputFiles('#bkfile', mk(good));
+  await page.waitForSelector('#bkRestore');
+  const t = await text(page);
+  assert.ok(t.includes('Do dodania: 2 wpisów i 1 nowych dłużników') && t.includes('Pominięto 1'), t.slice(0, 400));
+  page.once('dialog', d => d.accept());
+  await page.click('#bkRestore');
+  await page.waitForFunction(() => window.__db.entries.length === 3 && window.__db.debtors.length === 2);
+  assert.deepEqual(await page.evaluate(() => window.__db.debtors.map(d => d.name)), ['Zosia', 'Nowy']);
+  await ctx.close();
+});
