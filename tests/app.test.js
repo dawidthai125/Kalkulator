@@ -30,6 +30,14 @@ test('zalogowany użytkownik może zmienić hasło (przycisk w pasku i karta, ta
   assert.match(click, /length<8/, 'minimum 8 znaków');
 });
 
+test('tekstowe pola kwoty (szybkie dopisanie, pominięte linie importu) przyjmują tylko liczby', () => {
+  const app = read('app.js');
+  const input = app.slice(app.indexOf("document.addEventListener('input'"));
+  assert.match(input, /Loans\.numOnly\(/);
+  assert.match(input, /id==='qa'/, 'filtr musi obejmować pole szybkiej kwoty #qa');
+  assert.match(input, /sk-am/, 'filtr musi obejmować kwoty pominiętych linii importu');
+});
+
 test('stara stawka zapisana w bazie jest ignorowana przy wczytywaniu dłużników', () => {
   const load = read('app.js').match(/async function load\(\)[\s\S]*?\n\}/)[0];
   assert.match(load, /rate:0/);

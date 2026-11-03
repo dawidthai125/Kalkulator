@@ -219,5 +219,12 @@
     return prev && prev.id === next.id ? 'same' : 'login';
   }
 
-  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition };
+  // Zostawia w tekście tylko kwotę: cyfry i jeden separator dziesiętny (przecinek lub kropka), najwyżej
+  // 2 miejsca po nim. Litery, spacje i minus są usuwane ("148 Syfon" -> "148").
+  function numOnly(v) {
+    var m = String(v).replace(/[^\d.,]/g, '').match(/^\d*[.,]?\d{0,2}/);
+    return m ? m[0] : '';
+  }
+
+  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition, numOnly: numOnly };
 });

@@ -284,6 +284,32 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Pole kwoty przyjmuje tylko liczby ---
+
+test('numOnly: litery i inne znaki są odrzucane, zostaje sama liczba', () => {
+  assert.equal(L.numOnly('148 Syfon'), '148');
+  assert.equal(L.numOnly('Syfon'), '');
+  assert.equal(L.numOnly('-5'), '5');
+  assert.equal(L.numOnly('1 000'), '1000');
+  assert.equal(L.numOnly('12 zł'), '12');
+  assert.equal(L.numOnly(''), '');
+});
+
+test('numOnly: jeden separator dziesiętny (przecinek lub kropka) i najwyżej 2 miejsca po nim', () => {
+  assert.equal(L.numOnly('250,5'), '250,5');
+  assert.equal(L.numOnly('250.50'), '250.50');
+  assert.equal(L.numOnly('12,345'), '12,34');
+  assert.equal(L.numOnly('1,2,3'), '1,2');
+  assert.equal(L.numOnly('1.2.3'), '1.2');
+  assert.equal(L.numOnly(',5'), ',5');
+});
+
+test('numOnly: wynik zawsze daje się sparsować jak kwota w app.js', () => {
+  for (const s of ['148', '250,5', '250.50', ',5']) {
+    assert.ok(parseFloat(L.numOnly(s).replace(',', '.')) > 0, s);
+  }
+});
+
 test('authTransition: brak sesji to wylogowanie', () => {
   assert.equal(L.authTransition({ id: 'a' }, null), 'logout');
   assert.equal(L.authTransition(null, null), 'logout');

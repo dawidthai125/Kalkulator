@@ -272,7 +272,11 @@ document.addEventListener('change',function(e){
   r.onerror=function(){toast('Nie udało się odczytać pliku.')};
   r.readAsText(f);e.target.value='';
 });
-document.addEventListener('input',function(e){if(e.target.id==='mo')plan();else if(e.target.classList&&e.target.classList.contains('sk-am'))refreshImpBtn()});
+document.addEventListener('input',function(e){
+  var t=e.target,isAm=t.id==='qa'||(t.classList&&t.classList.contains('sk-am'));
+  if(isAm){var clean=Loans.numOnly(t.value);if(clean!==t.value)t.value=clean}  // pole kwoty: tylko liczby
+  if(t.id==='mo')plan();else if(t.classList&&t.classList.contains('sk-am'))refreshImpBtn()
+});
 SB.auth.onAuthStateChange(function(ev,session){
   // Supabase wysyła SIGNED_IN także po każdym powrocie do karty i odświeżeniu tokenu. Przeładowanie widoku
   // kasowało wtedy wpisywaną kwotę, więc dla tego samego konta tylko zapamiętujemy sesję.
