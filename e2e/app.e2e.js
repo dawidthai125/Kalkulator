@@ -115,6 +115,38 @@ test('import: duplikaty są oznaczone i domyślnie pomijane, a odznaczenie pola 
   await ctx.close();
 });
 
+test('historia zmian: właściciel wczytuje dziennik zmian wpisów dłużnika', async () => {
+  const { page, ctx } = await open(ADMIN);
+  await page.waitForSelector('#logShow');
+  await page.evaluate(() => {
+    window.__db.entry_log.push(
+      { id: 2, debtor_id: 'd1', action: 'update', old_data: { type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' }, new_data: { type: 'loan', date: '2026-10-01', amount: 600, note: 'Syfon' }, at: '2026-11-03T10:30:00Z' },
+      { id: 1, debtor_id: 'd1', action: 'insert', old_data: null, new_data: { type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' }, at: '2026-11-03T10:00:00Z' },
+      { id: 3, debtor_id: 'inny', action: 'delete', old_data: { type: 'pay', date: '2026-10-01', amount: 1, note: '' }, at: '2026-11-03T11:00:00Z' });
+  });
+  await page.click('#logShow');
+  await page.waitForFunction(() => document.body.innerText.includes('Zmieniono'));
+  const t = await text(page);
+  assert.ok(t.includes('Dodano') && t.includes('pożyczka 500,00 zł z 01.10.2026 (Syfon)') && t.includes('kwota 500,00 → 600,00 zł'), t.slice(0, 400));
+  assert.ok(!t.includes('Usunięto'), 'wpisy dziennika innych dłużników nie są pokazywane');
+  await ctx.close();
+});
+
+test('monitoring błędów: nieobsłużony błąd jest zgłaszany raz, a brak sieci nie', async () => {
+  const { page, ctx } = await open(ADMIN);
+  await page.waitForSelector('.total');
+  await page.evaluate(() => { setTimeout(() => { throw new Error('e2e boom'); }, 0); });
+  await page.waitForFunction(() => window.__db.client_errors.length === 1);
+  await page.evaluate(() => { setTimeout(() => { throw new Error('e2e boom'); }, 0); });
+  await page.evaluate(() => { Promise.reject(new Error('TypeError: Failed to fetch')); });
+  await page.evaluate(() => { Promise.reject(new Error('e2e async')); });
+  await page.waitForFunction(() => window.__db.client_errors.length === 2);
+  const msgs = await page.evaluate(() => window.__db.client_errors.map(e => e.message));
+  assert.equal(msgs.length, 2);
+  assert.ok(msgs[0].includes('e2e boom') && msgs[1] === 'e2e async', JSON.stringify(msgs));
+  await ctx.close();
+});
+
 test('dłużnik: widok z rozliczeniem, PDF i informacją o prywatności', async () => {
   const { page, ctx } = await open(DEBTOR, {}, () => { window.print = () => { window.__printed = (document.getElementById('pdfdoc') || {}).innerText; }; });
   await page.waitForSelector('#dPdf');

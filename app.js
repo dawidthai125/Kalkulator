@@ -10,6 +10,18 @@ function fail(r){
   return false;
 }
 
+// --- Monitoring błędów: nieobsłużone błędy JS trafiają do bazy (z limitem), żeby właściciel wiedział o problemach ---
+var errSent=0,errSeen={};
+function reportError(msg,src){
+  try{
+    msg=String(msg||'').slice(0,500);
+    if(!S.user||!msg||errSent>=5||errSeen[msg]||Loans.isNetworkError({message:msg}))return;
+    errSeen[msg]=1;errSent++;
+    SB.rpc('log_client_error',{p_message:msg,p_source:String(src||'').slice(0,300),p_ua:navigator.userAgent.slice(0,200)}).then(function(){},function(){});
+  }catch(e){}
+}
+function logTime(iso){var d=new Date(iso);return Loans.datePL(Loans.localDate(d))+', '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+
 // --- Tryb offline: ostatni wczytany stan (tylko do odczytu), zapisany na urządzeniu zalogowanego użytkownika ---
 var SNAP_KEY='dluznik-snapshot-v1',INST_KEY='dluznik-install-hidden',deferredInstall=null;
 function snapSave(){try{localStorage.setItem(SNAP_KEY,JSON.stringify({uid:S.user.id,at:Date.now(),role:S.role,debtors:S.debtors,me:S.me,pending:S.pending}))}catch(e){}}
@@ -191,6 +203,7 @@ function render(){
   '<label class="wide">Opis (opcjonalnie)<input id="nt" maxlength="200" placeholder="np. przelew za październik" autocomplete="off"></label></div>'+
   '<div class="foot"><button class="btn" id="addE">Dodaj wpis</button></div></div>'+
   '<div class="card"><h2>Historia</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów. Dodaj pierwszą pożyczkę.</p>')+'<p class="msg"></p></div>'+
+  '<div class="card"><h2>Historia zmian</h2><p class="sub">Kto i kiedy dopisał, zmienił lub usunął wpis. Zapisuje to baza, więc nie da się tego ominąć z aplikacji (historia obejmuje zmiany od 3.11.2026).</p><div id="logBox"><div class="row"><button class="btn ghost" id="logShow" style="color:var(--ink)">Pokaż historię zmian</button></div></div></div>'+
   '<div class="card"><h2>Przypomnienie o kwocie</h2><p class="sub">Przy otwarciu aplikacji w dniu terminu (lub później) zobaczysz na górze aktualną kwotę do spłaty.</p>'+
   '<div class="row"><label>Termin<input id="rd" type="date" value="'+esc(d.remind_at)+'"></label><label>Notatka (opcjonalnie)<input id="rn" maxlength="200" value="'+esc(d.remind_note)+'"></label></div>'+
   '<div class="row" style="margin-top:10px"><button class="btn" id="rSave">Zapisz przypomnienie</button><button class="btn ghost" id="rIcs" style="color:var(--ink)">Dodaj do Kalendarza iPhone</button><button class="btn ghost" id="rClear">Usuń</button></div></div>'+
@@ -411,6 +424,13 @@ document.addEventListener('click',async function(e){
     if(fail(r))return;
   }
   else if(id==='logout'){await pushCleanup();await SB.auth.signOut()}
+  else if(id==='logShow'&&d){
+    t.disabled=true;
+    var lr=await SB.from('entry_log').select('*').eq('debtor_id',d.id).order('at',{ascending:false}).limit(50);
+    if(fail(lr)){t.disabled=false;return}
+    var lb=document.getElementById('logBox');
+    if(lb)lb.innerHTML=lr.data.length?'<ul class="rqs">'+lr.data.map(function(x){var ds=Loans.describeLog(x);return '<li class="rq"><div><b>'+esc(ds.label)+'</b> · '+esc(logTime(x.at))+'</div><div class="note" style="max-width:none">'+esc(ds.text)+'</div></li>'}).join('')+'</ul>'+(lr.data.length>=50?'<p class="sub" style="margin-top:8px">Pokazano ostatnie 50 zmian.</p>':''):'<p class="empty">Brak zapisanych zmian.</p>';
+  }
   else if(id==='pushOn'){await pushEnable()}
   else if(id==='pushOff'){await pushDisable()}
   else if(id==='pwToggle'){S.pwOpen=!S.pwOpen;render();var f1=document.getElementById('pw1');if(f1)f1.focus()}
@@ -603,6 +623,8 @@ window.addEventListener('online',function(){if(S.user&&S.offline)load()});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)softRefresh()});
 window.addEventListener('focus',softRefresh);
 setInterval(softRefresh,60000);
+window.addEventListener('error',function(e){reportError(e.message,(e.filename||'')+':'+(e.lineno||''))});
+window.addEventListener('unhandledrejection',function(e){var r=e.reason;reportError(r&&r.message?r.message:r,'promise')});
 document.addEventListener('change',function(e){if(e.target&&e.target.id==='skipdup'){S.skipDup=e.target.checked;renderImpPreview()}});
 // Android/Chrome: własny przycisk instalacji zamiast ukrytej pozycji w menu przeglądarki.
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferredInstall=e;showInstall()});

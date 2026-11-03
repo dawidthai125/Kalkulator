@@ -284,6 +284,27 @@ test('authTransition: pierwsze logowanie i zmiana konta ładują dane', () => {
   assert.equal(L.authTransition({ id: 'a' }, { id: 'b' }), 'login');
 });
 
+// --- Historia zmian ---
+
+test('describeLog: dodanie, zmiana kwoty i opisu oraz usunięcie opisane po polsku', () => {
+  assert.deepEqual(L.describeLog({ action: 'insert', new_data: { type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' } }),
+    { label: 'Dodano', text: 'pożyczka 500,00 zł z 01.10.2026 (Syfon)' });
+  assert.deepEqual(L.describeLog({ action: 'insert', new_data: { type: 'pay', date: '2026-10-10', amount: '200.5', note: '' } }),
+    { label: 'Dodano', text: 'spłata 200,50 zł z 10.10.2026' });
+  assert.deepEqual(L.describeLog({ action: 'update', old_data: { type: 'loan', date: '2026-10-01', amount: 500, note: 'a' }, new_data: { type: 'loan', date: '2026-10-01', amount: 600, note: 'a' } }),
+    { label: 'Zmieniono', text: 'kwota 500,00 → 600,00 zł' });
+  assert.deepEqual(L.describeLog({ action: 'update', old_data: { type: 'loan', date: '2026-10-01', amount: 500, note: '' }, new_data: { type: 'pay', date: '2026-10-02', amount: 500, note: 'b' } }),
+    { label: 'Zmieniono', text: 'rodzaj pożyczka → spłata; data 01.10.2026 → 02.10.2026; opis — → „b”' });
+  assert.deepEqual(L.describeLog({ action: 'delete', old_data: { type: 'pay', date: '2026-10-10', amount: 200, note: 'Przelew' } }),
+    { label: 'Usunięto', text: 'spłata 200,00 zł z 10.10.2026 (Przelew)' });
+});
+
+test('describeLog: nieznana akcja i brak danych nie powodują błędu', () => {
+  assert.equal(L.describeLog({ action: 'dziwna' }).label, 'dziwna');
+  assert.equal(L.describeLog({ action: 'update', old_data: null, new_data: null }).text, 'bez zmian w polach wpisu');
+  assert.equal(L.describeLog({ action: 'insert' }).text, '');
+});
+
 // --- Duplikaty w imporcie i odświeżanie ---
 
 test('markDuplicates: ta sama data, rodzaj i kwota co istniejący wpis to duplikat (z licznością)', () => {

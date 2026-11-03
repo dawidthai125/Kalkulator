@@ -5,13 +5,13 @@
   var DB = window.__db = {
     debtors: [{ id: 'd1', name: 'Zosia', rate: 0, remind_at: null, remind_note: null, created_at: '1' }],
     entries: [{ id: 'e1', debtor_id: 'd1', type: 'loan', date: '2026-10-01', amount: 500, note: 'Syfon' }],
-    repayment_requests: [], debtor_access: [], push_subscriptions: [],
+    repayment_requests: [], debtor_access: [], push_subscriptions: [], entry_log: [], client_errors: [],
   };
   var NET = { message: 'TypeError: Failed to fetch' }, n = 0, cbs = [];
   function failing() { return localStorage.getItem('__fail') === '1'; }
   function q(t) {
     var o = { act: 'select', f: [] };
-    o.select = function () { return o; }; o.order = function () { return o; };
+    o.select = function () { return o; }; o.order = function () { return o; }; o.limit = function () { return o; };
     o.eq = function (k, v) { o.f.push([k, v]); return o; };
     o.single = function () { o.s = 1; return o; };
     o.insert = function (r) { o.act = 'insert'; o.r = r; return o; };
@@ -39,6 +39,7 @@
       if (a.p_approve) DB.entries.push({ id: 'n' + (++n), debtor_id: r.debtor_id, type: 'pay', date: '2026-11-03', amount: r.amount, note: 'Zgłoszone przez dłużnika' });
       return null;
     },
+    log_client_error: function (a) { DB.client_errors.push({ message: a.p_message, source: a.p_source }); return null; },
     save_push_subscription: function (a) { DB.push_subscriptions.push({ endpoint: a.p_endpoint }); return null; },
   };
   window.supabase = {
