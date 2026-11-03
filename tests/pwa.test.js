@@ -62,6 +62,54 @@ test('instalacja: karta „Zainstaluj aplikację” (Android) i instrukcja dla i
   assert.match(app, /display-mode: standalone/, 'w zainstalowanej aplikacji karta się nie pokazuje');
 });
 
+test('push: service worker pokazuje powiadomienie i otwiera aplikację po kliknięciu', () => {
+  const sw = read('sw.js');
+  assert.match(sw, /addEventListener\('push'/); assert.match(sw, /showNotification\(/);
+  assert.match(sw, /addEventListener\('notificationclick'/); assert.match(sw, /openWindow\(/); assert.match(sw, /\.focus\(\)/);
+  assert.match(sw, /e\.data\.json\(\)/, 'ładunek JSON z tytułem i treścią');
+});
+
+test('push: włączanie z gestu użytkownika, subskrypcja widoczna, zapis przez RPC, klucz z funkcji serwerowej', () => {
+  const app = read('app.js');
+  const on = app.match(/async function pushEnable\(\)[\s\S]*?\n\}/)[0];
+  assert.ok(on.indexOf('Notification.requestPermission') < on.indexOf('await pushKey'), 'najpierw zgoda (gest użytkownika), potem reszta');
+  assert.match(on, /userVisibleOnly:true/); assert.match(on, /Loans\.urlBase64ToUint8Array\(/);
+  assert.match(on, /SB\.rpc\('save_push_subscription'/);
+  assert.match(app, /action:'key'/);
+  assert.match(app, /id="pushOn"/); assert.match(app, /id="pushOff"/);
+  assert.match(app, /Dodaj do ekranu początkowego|dodaj aplikację do ekranu głównego/i, 'iPhone: najpierw instalacja');
+});
+
+test('push: wylogowanie najpierw kasuje subskrypcję tego urządzenia (bez cudzych powiadomień na wspólnym telefonie)', () => {
+  const app = read('app.js');
+  const logout = app.match(/id==='logout'\)\{[^\n]*\}/)[0];
+  assert.ok(logout.indexOf('pushCleanup') >= 0 && logout.indexOf('pushCleanup') < logout.indexOf('signOut'), logout);
+  assert.match(app, /async function pushCleanup\(/);
+});
+
+test('push: powiadomienia po zgłoszeniu spłaty (do właściciela) i po decyzji (do dłużnika)', () => {
+  const app = read('app.js');
+  assert.match(app, /notifyPush\('request',/); assert.match(app, /notifyPush\('decision',/);
+  assert.match(app, /function notifyPush\(/);
+});
+
+test('push: funkcja serwerowa sprawdza uprawnienia, wysyła najwyżej raz i nie ujawnia klucza prywatnego', () => {
+  const fn = read('supabase/functions/send-push/index.ts');
+  assert.match(fn, /\.eq\('requested_by', caller\)/); assert.match(fn, /\.eq\('owner_id', caller\)/);
+  assert.match(fn, /\.is\('notified_at', null\)/); assert.match(fn, /\.is\('decision_notified_at', null\)/);
+  assert.match(fn, /code === 404 \|\| code === 410/, 'wygasłe subskrypcje są sprzątane');
+  for (const m of fn.matchAll(/json\(\{[^}]*\}/g)) assert.ok(!/private_key/.test(m[0]), 'odpowiedź nie może zawierać klucza prywatnego: ' + m[0]);
+  assert.ok(!/BEGIN (EC )?PRIVATE KEY/.test(fn));
+});
+
+test('push: migracja ukrywa klucze VAPID i nie pozwala zapisywać subskrypcji bezpośrednio', () => {
+  const sql = read('supabase/migrations/20261103_push_notifications.sql');
+  assert.match(sql, /alter table public\.push_config enable row level security/);
+  assert.match(sql, /revoke all on public\.push_config from anon, authenticated/);
+  assert.match(sql, /revoke insert, update on public\.push_subscriptions from authenticated/);
+  assert.match(sql, /security definer/);
+});
+
 test('CSP i nagłówki pozwalają na service workera bez osłabiania zabezpieczeń', () => {
   const v = JSON.parse(read('vercel.json')).headers[0].headers.find(h => h.key === 'Content-Security-Policy').value;
   assert.match(v, /script-src 'self'(;|$)/); assert.ok(!/unsafe-eval/.test(v));
