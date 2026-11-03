@@ -46,6 +46,14 @@ test('eksport PDF: przycisk, dokument z rozliczeniem i druk', () => {
   assert.match(app, /host\.id='pdfdoc'/, 'dokument do druku musi mieć własny kontener #pdfdoc');
 });
 
+test('eksport PDF: stopka z podpisem autora i hasłem o odzyskiwaniu pieniążków', () => {
+  const doc = read('app.js').match(/function pdfHtml\([\s\S]*?\n\}/)[0];
+  const foot = doc.slice(doc.indexOf('<footer'));
+  assert.match(foot, /System <b>Dłużnik 2\.0<\/b> stworzony przez <b>Dawida Thai Thanh<\/b>/);
+  assert.match(foot, /na potrzeby odzyskania pieniążków, założonych, pożyczonych i w ogóle :D/);
+  assert.match(foot, /Zestawienie ma charakter informacyjny/, 'adnotacja informacyjna zostaje');
+});
+
 test('eksport PDF: dane wpisane przez użytkownika są escapowane w dokumencie', () => {
   const app = read('app.js');
   const doc = app.match(/function pdfHtml\([\s\S]*?\n\}/)[0];
