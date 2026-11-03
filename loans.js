@@ -211,5 +211,13 @@
     return { rows: out, skip: skip, hours: { rate: rate, lines: hoursLines } };
   }
 
-  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes };
+  // Co zrobić ze zdarzeniem logowania z Supabase. Supabase wysyła SIGNED_IN także przy każdym powrocie
+  // do karty i odświeżeniu tokenu; wtedy NIE wolno przeładowywać widoku, bo kasuje to wpisywaną kwotę.
+  // prev/next = użytkownik { id } albo null. Zwraca 'same' | 'login' | 'logout'.
+  function authTransition(prev, next) {
+    if (!next) return 'logout';
+    return prev && prev.id === next.id ? 'same' : 'login';
+  }
+
+  return { today: today, localDate: localDate, esc: esc, days: days, calc: calc, monthlyPayment: monthlyPayment, parseNotes: parseNotes, authTransition: authTransition };
 });
