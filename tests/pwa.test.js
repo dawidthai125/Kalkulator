@@ -102,6 +102,13 @@ test('push: funkcja serwerowa sprawdza uprawnienia, wysyła najwyżej raz i nie 
   assert.ok(!/BEGIN (EC )?PRIVATE KEY/.test(fn));
 });
 
+test('push: treść powiadomienia jest ogólna (bez imienia i kwoty na ekranie blokady)', () => {
+  const fn = read('supabase/functions/send-push/index.ts');
+  assert.ok(!/money\.format/.test(fn), 'kwota nie może trafiać do treści');
+  assert.ok(!/d\?\.name/.test(fn), 'imię dłużnika nie może trafiać do treści');
+  assert.match(fn, /Otwórz aplikację, aby zobaczyć szczegóły/);
+});
+
 test('push: migracja ukrywa klucze VAPID i nie pozwala zapisywać subskrypcji bezpośrednio', () => {
   const sql = read('supabase/migrations/20261103_push_notifications.sql');
   assert.match(sql, /alter table public\.push_config enable row level security/);

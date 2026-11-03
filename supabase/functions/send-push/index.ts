@@ -16,8 +16,6 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 const SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? 'https://kalkulator.vercel.app';
-const METHODS: Record<string, string> = { blik: 'BLIK', przelew: 'przelew', gotowka: 'gotówka', inne: 'inna forma' };
-const money = new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN' });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FRESH_MS = 10 * 60 * 1000;
 
@@ -71,26 +69,23 @@ Deno.serve(async (req) => {
   if (type === 'request') {
     const { data: r } = await admin.from('repayment_requests').update({ notified_at: now })
       .eq('id', id).eq('requested_by', caller).is('notified_at', null).gt('created_at', since)
-      .select('debtor_id,owner_id,amount,method').maybeSingle();
+      .select('owner_id').maybeSingle();
     if (!r) return json({ ok: true, sent: 0, reason: 'pominięto' });
-    const { data: d } = await admin.from('debtors').select('name').eq('id', r.debtor_id).maybeSingle();
     target = r.owner_id;
-    payload = {
-      title: 'Nowa spłata do akceptacji',
-      body: `${d?.name ?? 'Dłużnik'}: ${money.format(Number(r.amount))} (${METHODS[r.method] ?? r.method})`,
-      tag: `req-${id}`, url: './',
-    };
+    // Treść ogólna: powiadomienie widać na ekranie blokady, więc bez imienia i kwoty (szczegóły są w aplikacji).
+    payload = { title: 'Nowa spłata do akceptacji', body: 'Otwórz aplikację, aby zobaczyć szczegóły.', tag: `req-${id}`, url: './' };
   } else if (type === 'decision') {
     const { data: r } = await admin.from('repayment_requests').update({ decision_notified_at: now })
       .eq('id', id).eq('owner_id', caller).is('decision_notified_at', null).in('status', ['approved', 'rejected']).gt('decided_at', since)
-      .select('debtor_id,amount,status,decision_note').maybeSingle();
+      .select('debtor_id,status').maybeSingle();
     if (!r) return json({ ok: true, sent: 0, reason: 'pominięto' });
     const { data: a } = await admin.from('debtor_access').select('user_id').eq('debtor_id', r.debtor_id).maybeSingle();
     if (!a) return json({ ok: true, sent: 0, reason: 'dłużnik nie ma konta' });
     target = a.user_id;
-    payload = r.status === 'approved'
-      ? { title: 'Spłata zaakceptowana', body: `${money.format(Number(r.amount))} zostało dopisane do Twojej listy.`, tag: `dec-${id}`, url: './' }
-      : { title: 'Spłata odrzucona', body: `${money.format(Number(r.amount))}${r.decision_note ? ': ' + r.decision_note : ''}`, tag: `dec-${id}`, url: './' };
+    payload = {
+      title: r.status === 'approved' ? 'Spłata zaakceptowana' : 'Spłata odrzucona',
+      body: 'Otwórz aplikację, aby zobaczyć szczegóły.', tag: `dec-${id}`, url: './',
+    };
   } else {
     return json({ error: 'Nieznany typ powiadomienia.' }, 400);
   }

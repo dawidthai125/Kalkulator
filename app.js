@@ -106,24 +106,40 @@ async function pushDisable(){
 // Prosi funkcję serwerową o wysłanie powiadomienia; ona sama sprawdza uprawnienia i wysyła najwyżej raz.
 function notifyPush(type,id){try{SB.functions.invoke('send-push',{body:{action:'notify',type:type,request_id:id}}).catch(function(){})}catch(e){}}
 
-async function load(){
+// opts.soft: odświeżanie w tle (po powrocie do aplikacji): błąd sieci nic nie psuje, a bez zmian w danych nie przerysowujemy widoku.
+async function load(opts){
+  var soft=!!(opts&&opts.soft);
   // Rolę ustala baza: konto dłużnika dostaje swój przegląd, właściciel dostaje null i widzi wszystkie swoje listy.
   var ov=await SB.rpc('debtor_overview');
+  if(ov.error&&soft)return;
   if(offlineFallback(ov))return;
   if(fail(ov))return;
-  if(ov.data){S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];S.offline=0;snapSave();render();refreshPush();return}
+  if(ov.data){
+    var changedD=S.role!=='debtor'||!!S.offline||JSON.stringify(S.me)!==JSON.stringify(ov.data);
+    S.role='debtor';S.me=ov.data;S.debtors=[];S.sel=null;S.pending=[];S.offline=0;S.lastLoad=Date.now();snapSave();
+    if(changedD||!soft){render();refreshPush()}
+    return;
+  }
+  if(S.user&&S.user.user_metadata&&S.user.user_metadata.role==='debtor'){
+    // konto dłużnika bez wiersza dostępu: właściciel odebrał dostęp, więc nie pokazujemy mu pustego widoku właściciela
+    await SB.auth.signOut();toast('Dostęp do tego konta został wyłączony przez właściciela.');return;
+  }
   S.role='admin';S.me=null;
   var a=await SB.from('debtors').select('*').order('created_at'),b=await SB.from('entries').select('*'),
       c=await SB.from('repayment_requests').select('*').eq('status','pending').order('created_at'),
       g=await SB.from('debtor_access').select('debtor_id,login');
   var bad=[a,b,c,g].find(function(x){return x.error});
+  if(bad&&soft)return;
   if(bad&&offlineFallback(bad))return;
   if(fail(a)||fail(b)||fail(c)||fail(g))return;
+  var before=JSON.stringify([S.debtors,S.pending]),wasOffline=!!S.offline;
   var acc={};g.data.forEach(function(x){acc[x.debtor_id]=x.login});
   S.pending=c.data.map(function(r){return{id:r.id,debtor_id:r.debtor_id,amount:+r.amount,method:r.method,note:r.note||'',created_at:r.created_at}});
   S.debtors=a.data.map(function(d){return{id:d.id,name:d.name,rate:0,access:acc[d.id]||'',remind_at:d.remind_at||'',remind_note:d.remind_note||'',entries:b.data.filter(function(e){return e.debtor_id===d.id}).map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})}});
   if(!cur())S.sel=S.debtors.length?S.debtors[0].id:null;
-  S.offline=0;snapSave();render();refreshPush();
+  S.offline=0;S.lastLoad=Date.now();snapSave();
+  if(soft&&!wasOffline&&JSON.stringify([S.debtors,S.pending])===before)return;
+  render();refreshPush();
 }
 
 function render(){
@@ -250,7 +266,9 @@ function renderDebtor(){
     '<label class="wide">Adnotacja (opcjonalnie)<input id="dn" maxlength="200" autocomplete="off" placeholder="np. przelew za październik"></label></div>'+
     '<div class="row" style="margin-top:10px"><button class="btn" id="dSend">Wyślij do akceptacji</button></div><p class="msg"></p></div>'+
     '<div class="card"><h2>Twoje zgłoszenia</h2>'+(reqs?'<ul class="rqs">'+reqs+'</ul>':'<p class="empty">Nie zgłoszono jeszcze żadnej spłaty.</p>')+'</div>'+
-    '<div class="card"><h2>Historia długu</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów.</p>')+'</div>';
+    '<div class="card"><h2>Rozliczenie do pobrania</h2><p class="sub">Zestawienie długów, spłat i kwoty końcowej jako dokument PDF (w oknie drukowania wybierz „Zapisz jako PDF”).</p><div class="row"><button class="btn" id="dPdf">Pobierz PDF</button></div></div>'+
+    '<div class="card"><h2>Historia długu</h2>'+(rows?'<div class="tablewrap"><table><thead><tr><th>Data</th><th>Rodzaj</th><th class="n">Kwota</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="empty">Brak wpisów.</p>')+'</div>'+
+    '<div class="card"><h2>Prywatność</h2><p class="sub" style="margin:0">Ta aplikacja przechowuje Twoje imię, wpisy długu i spłat oraz Twoje zgłoszenia spłat. Widzisz je Ty i właściciel listy, nikt inny. Dane są zapisane na serwerze w Unii Europejskiej (Frankfurt). Powiadomienia na telefonie zawierają tylko ogólną informację, bez imion i kwot. Jeśli chcesz usunąć konto lub dane, poproś o to właściciela listy.</p></div>';
 }
 // Wywołanie funkcji serwerowej (zakładanie / reset / usuwanie konta dłużnika). Zwraca { ok, error }.
 async function fnCall(body){
@@ -289,6 +307,42 @@ function plan(){
   o.value=fmt.format(Loans.monthlyPayment(c.cap+c.int,d.rate,n));
 }
 
+// Podgląd importu: wiersze, które już są na liście, są oznaczone, a pole „Pomiń” decyduje, czy wchodzą do sum i importu.
+var IMPPR=null,IMPMULTI=false;
+function impActive(){return IMP.filter(function(x){return !(S.skipDup&&x.dup)})}
+function renderImpPreview(){
+  var box=document.getElementById('impOut'),pr=IMPPR,multi=IMPMULTI;if(!box||!pr)return;
+  if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „1500 zł klej” albo „01.10.2026 +500”.</p>'+skipHtml(pr.skip);return}
+  var nd=IMP.filter(function(x){return x.dup}).length,act=impActive(),
+      nl=act.filter(function(x){return x.type==='loan'}),np=act.filter(function(x){return x.type==='pay'}),sl=sumAmounts(nl),sp=sumAmounts(np);
+  box.innerHTML=(nd?'<p class="sub" style="margin:12px 0 6px"><b>Wykryto '+nd+' wpisów, które już są na liście.</b></p><label style="display:flex;gap:8px;align-items:center;margin:0 0 6px;font-size:14px"><input type="checkbox" id="skipdup" style="width:auto;min-height:0"'+(S.skipDup?' checked':'')+'>Pomiń wpisy, które już są na liście</label>':'')+
+    '<div class="grid" style="margin-top:12px"><div>Długi (pożyczki), '+nl.length+' wpisów<b class="neg">'+fmt.format(sl)+'</b></div><div>Spłaty, '+np.length+' wpisów<b class="pos">'+fmt.format(sp)+'</b></div></div>'+
+    (pr.hours&&pr.hours.lines?'<p class="sub" style="margin-top:8px">Godziny przeliczone na kwoty: '+pr.hours.lines+' linii po '+pr.hours.rate+' zł/h.</p>':'')+
+    '<p class="sub" style="margin-top:8px">Saldo po imporcie (bez odsetek): <strong class="'+(sl-sp>0?'neg':'pos')+'">'+fmt.format(sl-sp)+'</strong></p>'+
+    '<div class="tablewrap"><table><thead><tr>'+(multi?'<th>Dłużnik</th>':'')+'<th>Data</th><th>Rodzaj i opis</th><th class="n">Kwota</th></tr></thead><tbody>'+
+    IMP.map(function(x){return '<tr'+(x.dup&&S.skipDup?' style="opacity:.5"':'')+'>'+(multi?'<td>'+esc(x.who)+'</td>':'')+'<td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+(x.dup?' <span class="st pending">już jest</span>':'')+(x.note?'<span class="note">'+esc(x.note)+'</span>':'')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
+    skipHtml(pr.skip)+
+    '<div class="foot"><button class="btn" id="doImp">Importuj '+act.length+' wpisów</button></div>';
+}
+// Drukuje (zapisuje jako PDF) rozliczenie dłużnika d z opcjami o = { msg, due, acct }.
+function printSettlement(d,o){
+  var host=document.getElementById('pdfdoc');
+  if(!host){host=document.createElement('div');host.id='pdfdoc';document.body.appendChild(host)}
+  host.innerHTML=pdfHtml(d,o);
+  var oldTitle=document.title;document.title='Rozliczenie - '+d.name+' - '+today(); // podpowiedź nazwy pliku PDF
+  window.onafterprint=function(){host.innerHTML='';document.title=oldTitle;window.onafterprint=null};
+  window.print();
+}
+// Odświeżanie w tle: po powrocie do aplikacji i co minutę, ale nigdy gdy ktoś coś wpisuje lub edytuje.
+var refreshing=false;
+function userTyping(){var a=document.activeElement;return !!a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&!!a.closest&&!!a.closest('#panel')}
+function hasDraft(){
+  return ['qa','qn','am','nt','dq','dn','imptxt','pdfmsg','pdfacct','pw1','pw2','acpw','aclogin','hrate'].some(function(id){var e=document.getElementById(id);return !!(e&&e.value&&e.value.trim())});
+}
+async function softRefresh(){
+  if(!Loans.shouldRefresh({hidden:document.hidden,loggedIn:!!(S.user&&S.role),busy:refreshing,typing:userTyping()||hasDraft()||!!S.editId,last:S.lastLoad||0,now:Date.now(),minMs:20000}))return;
+  refreshing=true;try{await load({soft:true})}finally{refreshing=false}
+}
 function sumAmounts(a){return Math.round(a.reduce(function(n,x){return n+x.amount},0)*100)/100}
 function skipHtml(a){
   if(!a.length)return '';
@@ -314,7 +368,7 @@ function manualRows(who){
 }
 function refreshImpBtn(){
   var b=document.getElementById('doImp');if(!b||b.disabled)return;
-  b.textContent='Importuj '+(IMP.length+manualRows('').length)+' wpisów';
+  b.textContent='Importuj '+(impActive().length+manualRows('').length)+' wpisów';
 }
 // Dokument rozliczenia dla dłużnika (drukowany / zapisywany jako PDF). o = { msg, due, acct } z formularza.
 function pdfHtml(d,o){
@@ -412,7 +466,7 @@ document.addEventListener('click',async function(e){
     var p1=document.getElementById('pw1').value,p2=document.getElementById('pw2').value;
     if(p1.length<8){toast('Hasło musi mieć co najmniej 8 znaków.');return}
     if(p1!==p2){toast('Hasła nie są takie same.');return}
-    var ru=await SB.auth.updateUser({password:p1,data:{must_change_password:false}});
+    var ru=await SB.auth.updateUser({password:p1,data:{must_change_password:false,role:(S.user.user_metadata||{}).role}});
     if(fail(ru))return;
     S.user=ru.data.user;S.pwOpen=false;await load();toast('Hasło zostało zmienione.');
   }
@@ -469,30 +523,22 @@ document.addEventListener('click',async function(e){
     if(en)Object.assign(en,{type:chg.type,date:chg.date,amount:chg.amount,note:ent});
     S.editId=null;render();
   }
-  else if(t.dataset.del&&d){var r=await SB.from('entries').delete().eq('id',t.dataset.del);if(fail(r))return;d.entries=d.entries.filter(function(x){return x.id!==t.dataset.del});render()}
+  else if(t.dataset.del&&d){var de=d.entries.find(function(x){return x.id===t.dataset.del});if(!confirm('Usunąć wpis: '+(de?(de.type==='loan'?'pożyczka ':'spłata ')+fmt.format(de.amount)+' z '+Loans.datePL(de.date):'')+'? Tej operacji nie można cofnąć.'))return;var r=await SB.from('entries').delete().eq('id',t.dataset.del);if(fail(r))return;d.entries=d.entries.filter(function(x){return x.id!==t.dataset.del});render()}
   else if(id==='delD'&&d){
     if(!confirm('Usunąć dłużnika „'+d.name+'” wraz z historią?'))return;
     var r=await SB.from('debtors').delete().eq('id',d.id);if(fail(r))return;
     S.debtors=S.debtors.filter(function(x){return x!==d});S.sel=S.debtors.length?S.debtors[0].id:null;render();
   }
   else if(id==='prev'&&d){
-    box=document.getElementById('impOut');
-    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked,hourlyRate:parseFloat(document.getElementById('hrate').value)||0,defaultDate:document.getElementById('idate').value||undefined});IMP=pr.rows;
-    if(!IMP.length){box.innerHTML='<p class="empty" style="margin-top:12px">Nie znaleziono kwot. Użyj formatu „1500 zł klej” albo „01.10.2026 +500”.</p>'+skipHtml(pr.skip);return}
-    var multi=document.getElementById('hdr').checked;
-    var nl=IMP.filter(function(x){return x.type==='loan'}),np=IMP.filter(function(x){return x.type==='pay'});
-    var sl=sumAmounts(nl),sp=sumAmounts(np);
-    box.innerHTML='<div class="grid" style="margin-top:12px"><div>Długi (pożyczki), '+nl.length+' wpisów<b class="neg">'+fmt.format(sl)+'</b></div><div>Spłaty, '+np.length+' wpisów<b class="pos">'+fmt.format(sp)+'</b></div></div>'+
-      (pr.hours&&pr.hours.lines?'<p class="sub" style="margin-top:8px">Godziny przeliczone na kwoty: '+pr.hours.lines+' linii po '+pr.hours.rate+' zł/h.</p>':'')+
-      '<p class="sub" style="margin-top:8px">Saldo po imporcie (bez odsetek): <strong class="'+(sl-sp>0?'neg':'pos')+'">'+fmt.format(sl-sp)+'</strong></p>'+
-      '<div class="tablewrap"><table><thead><tr>'+(multi?'<th>Dłużnik</th>':'')+'<th>Data</th><th>Rodzaj i opis</th><th class="n">Kwota</th></tr></thead><tbody>'+
-      IMP.map(function(x){return '<tr>'+(multi?'<td>'+esc(x.who)+'</td>':'')+'<td>'+x.date+'</td><td class="'+x.type+'">'+(x.type==='loan'?'Pożyczka':'Spłata')+(x.note?'<span class="note">'+esc(x.note)+'</span>':'')+'</td><td class="n '+x.type+'">'+fmt.format(x.amount)+'</td></tr>'}).join('')+'</tbody></table></div>'+
-      skipHtml(pr.skip)+
-      '<div class="foot"><button class="btn" id="doImp">Importuj '+IMP.length+' wpisów</button></div>';
+    var pr=parseNotes(document.getElementById('imptxt').value,document.getElementById('flip').checked,d.name,undefined,{headersAsDebtors:document.getElementById('hdr').checked,hourlyRate:parseFloat(document.getElementById('hrate').value)||0,defaultDate:document.getElementById('idate').value||undefined});
+    var byNm={};S.debtors.forEach(function(z){byNm[z.name.toLowerCase()]=z});
+    // wpisy, które już są na liście (ta sama data, rodzaj i kwota), oznaczamy i domyślnie pomijamy
+    IMP=Loans.markDuplicates(pr.rows,function(who){var k=byNm[String(who).toLowerCase()];return k?k.entries:[]});
+    IMPPR=pr;IMPMULTI=document.getElementById('hdr').checked;S.skipDup=true;renderImpPreview();
   }
-  else if(id==='doImp'&&(IMP.length||document.querySelector('#impOut .sk-am'))){
-    var ALL=IMP.concat(manualRows(d?d.name:''));
-    if(!confirm('Zaimportować '+ALL.length+' wpisów? Powtórny import tej samej notatki podwoi wpisy.'))return;
+  else if(id==='doImp'&&(impActive().length||document.querySelector('#impOut .sk-am'))){
+    var ALL=impActive().concat(manualRows(d?d.name:'')),dupN=S.skipDup?IMP.filter(function(x){return x.dup}).length:0;
+    if(!confirm('Zaimportować '+ALL.length+' wpisów?'+(dupN?' Pominięto '+dupN+', które już są na liście.':' Powtórny import tej samej notatki podwoi wpisy.')))return;
     t.disabled=true;t.textContent='Importuję…';
     var byName={};S.debtors.forEach(function(z){byName[z.name.toLowerCase()]=z});
     var rows=[];
@@ -505,13 +551,11 @@ document.addEventListener('click',async function(e){
     IMP=[];await load();
   }
   else if(id==='pdfExp'&&d){
-    var po={msg:document.getElementById('pdfmsg').value.trim(),due:document.getElementById('pdfdue').value,acct:document.getElementById('pdfacct').value.trim()};
-    var host=document.getElementById('pdfdoc');
-    if(!host){host=document.createElement('div');host.id='pdfdoc';document.body.appendChild(host)}
-    host.innerHTML=pdfHtml(d,po);
-    var oldTitle=document.title;document.title='Rozliczenie - '+d.name+' - '+today(); // podpowiedź nazwy pliku PDF
-    window.onafterprint=function(){host.innerHTML='';document.title=oldTitle;window.onafterprint=null};
-    window.print();
+    printSettlement(d,{msg:document.getElementById('pdfmsg').value.trim(),due:document.getElementById('pdfdue').value,acct:document.getElementById('pdfacct').value.trim()});
+  }
+  else if(id==='dPdf'&&S.role==='debtor'){
+    // dłużnik pobiera własne rozliczenie: ten sam dokument co u właściciela, bez wiadomości, terminu i numeru konta
+    printSettlement({name:S.me.name,rate:0,entries:S.me.entries.map(function(e){return{id:e.id,type:e.type,date:e.date,amount:+e.amount,note:e.note||''}})},{msg:'',due:'',acct:''});
   }
   else if(id==='expOne'||id==='expAll'){
     var txt=exportText(id==='expAll');box=document.getElementById('expOut');
@@ -555,6 +599,11 @@ SB.auth.onAuthStateChange(function(ev,session){
 });
 // Po powrocie sieci tryb offline odświeża się sam.
 window.addEventListener('online',function(){if(S.user&&S.offline)load()});
+// Odświeżanie danych po powrocie do aplikacji i co minutę (bez gubienia wpisywanego tekstu).
+document.addEventListener('visibilitychange',function(){if(!document.hidden)softRefresh()});
+window.addEventListener('focus',softRefresh);
+setInterval(softRefresh,60000);
+document.addEventListener('change',function(e){if(e.target&&e.target.id==='skipdup'){S.skipDup=e.target.checked;renderImpPreview()}});
 // Android/Chrome: własny przycisk instalacji zamiast ukrytej pozycji w menu przeglądarki.
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferredInstall=e;showInstall()});
 window.addEventListener('appinstalled',function(){deferredInstall=null;var c=document.getElementById('instCard');if(c)c.remove()});

@@ -1,0 +1,11 @@
+{
+  "name": "kalkulator-e2e",
+  "private": true,
+  "description": "Testy przeglądarki (Playwright) z atrapą Supabase. Uruchomienie: npm ci && npx playwright install chromium && node --test app.e2e.js",
+  "scripts": {
+    "test": "node --test app.e2e.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
