@@ -1,0 +1,41 @@
+plugins { id 'com.android.application' }
+
+// Podpis: klucz testowy podawany z zewnątrz (nie leży w repozytorium).
+// Użycie: ./gradlew assembleRelease -PKEYSTORE=/ścieżka/test.jks -PKEYSTORE_PASS=...
+def ks = project.findProperty('KEYSTORE')
+
+android {
+    namespace 'com.dluznik.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.dluznik.app'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+    if (ks) {
+        signingConfigs {
+            test {
+                storeFile file(ks)
+                storePassword project.findProperty('KEYSTORE_PASS')
+                keyAlias 'dluznik-test'
+                keyPassword project.findProperty('KEYSTORE_PASS')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ks) signingConfig signingConfigs.test
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}
