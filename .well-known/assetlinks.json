@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.dluznik.app",
+    "sha256_cert_fingerprints": ["79:1C:26:E3:05:F1:51:8E:E9:79:08:05:9E:13:96:5A:1B:1B:1A:3D:FD:5E:CF:12:7E:57:64:3F:84:27:AB:EE"]
+  }
+}]

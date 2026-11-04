@@ -132,3 +132,15 @@ test('CSP i nagłówki pozwalają na service workera bez osłabiania zabezpiecze
   assert.match(v, /script-src 'self'(;|$)/); assert.ok(!/unsafe-eval/.test(v));
   assert.ok(!/worker-src\s+\*/.test(v));
 });
+
+test('Android (TWA): assetlinks.json wskazuje pakiet z manifestu aplikacji, a klucze nie trafiają do repozytorium', () => {
+  const links = JSON.parse(read('.well-known/assetlinks.json'));
+  const t = links[0].target;
+  assert.equal(t.namespace, 'android_app');
+  assert.match(t.sha256_cert_fingerprints[0], /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  assert.ok(manifest.includes('https://dluznik.vercel.app/'), 'adres strony');
+  assert.match(read('android/app/build.gradle'), new RegExp("applicationId '" + t.package_name.replace(/\./g, '\\.') + "'"));
+  assert.match(read('android/.gitignore'), /\*\.jks/); assert.match(read('android/.gitignore'), /\*\.apk/);
+  assert.ok(!/storePassword\s+['"]/.test(read('android/app/build.gradle')), 'hasło klucza nie może być w repozytorium');
+});
